@@ -1,0 +1,6 @@
+{
+  "name": "KuroList - NextGen Anime & Manga Social Platform",
+  "description": "Next-generation social anime and manga tracking platform. Discover trending anime, track your watchlist and reading progress, generate your Anime Identity Card, and connect with fellow fans.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
