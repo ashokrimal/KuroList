@@ -28,6 +28,18 @@ import {
   INITIAL_TOPICS,
   INITIAL_NOTIFICATIONS
 } from '../data/initialFeed';
+import { User as FirebaseUser } from 'firebase/auth';
+import {
+  subscribeToAuth,
+  signInWithGoogle,
+  signOutUser,
+  saveUserProfile,
+  saveLibraryEntryToFirestore,
+  removeLibraryEntryFromFirestore,
+  fetchUserLibraryFromFirestore,
+  saveReviewToFirestore,
+  saveTopicToFirestore
+} from '../services/firebaseService';
 
 interface AppContextType {
   // Current user & profiles
@@ -39,6 +51,13 @@ interface AppContextType {
   updateCurrentUser: (updates: Partial<UserProfile>) => void;
   following: string[];
   toggleFollow: (userId: string) => void;
+
+  // Firebase Auth
+  firebaseUser: FirebaseUser | null;
+  signInWithGoogleAction: () => Promise<void>;
+  signOutAction: () => Promise<void>;
+  isFirebaseLoading: boolean;
+
 
   // Media catalog & live search
   mediaItems: MediaItem[];
@@ -238,6 +257,100 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }, 3200);
   };
 
+  // Firebase Auth state & live synchronization
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [isFirebaseLoading, setIsFirebaseLoading] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToAuth(async (fUser) => {
+      setFirebaseUser(fUser);
+      if (fUser) {
+        // Construct or load profile for the Firebase user
+        const fProfile: UserProfile = {
+          id: fUser.uid,
+          username: (fUser.displayName || 'user').toLowerCase().replace(/\s+/g, '_').slice(0, 20),
+          displayName: fUser.displayName || 'Anime Enthusiast',
+          email: fUser.email || '',
+          avatar: fUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${fUser.uid}`,
+          banner: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=1600&auto=format&fit=crop&q=80',
+          bio: 'Otaku and active member of the KuroList anime community.',
+          country: 'Global',
+          joinDate: new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+          isOnline: true,
+          role: 'user',
+          level: 1,
+          xp: 120,
+          nextLevelXp: 500,
+          badges: [],
+          achievements: [],
+          followingCount: 2,
+          followersCount: 0,
+          personality: {
+            title: 'Anime Explorer',
+            tagline: 'Embarking on the anime discovery journey',
+            dominantGenre: 'Action',
+            watchingPace: 'Binge Master',
+            vibeDescription: 'Exploring worlds, tracking seasons, and sharing experiences.',
+            compatibleArchetypes: ['Action Hero', 'Shonen Protagonist']
+          },
+          favoriteMediaIds: ['anime_1', 'anime_2'],
+          favoriteCharacterNames: ['Gojo Satoru'],
+          favoriteStudios: ['MAPPA', 'Ufotable'],
+          privacy: {
+            publicLibrary: true,
+            publicFavorites: true,
+            publicActivity: true
+          }
+        };
+
+        setCurrentUser(fProfile);
+        setActiveProfileViewUser(fProfile);
+        saveUserProfile(fProfile).catch(() => {});
+
+        // Load personal library from Firestore
+        try {
+          const cloudLibrary = await fetchUserLibraryFromFirestore(fUser.uid);
+          if (cloudLibrary && cloudLibrary.length > 0) {
+            setLibrary(cloudLibrary as LibraryEntry[]);
+          }
+        } catch (e) {
+          console.warn('Could not load user library from Firestore:', e);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const signInWithGoogleAction = async () => {
+    try {
+      setIsFirebaseLoading(true);
+      const user = await signInWithGoogle();
+      if (user) {
+        showToast(`Signed in with Google as ${user.displayName || user.email}!`);
+        setIsAuthModalOpen(false);
+      }
+    } catch (err: any) {
+      console.error(err);
+      showToast('Google sign-in was canceled or encountered an issue.', 'error');
+    } finally {
+      setIsFirebaseLoading(false);
+    }
+  };
+
+  const signOutAction = async () => {
+    try {
+      await signOutUser();
+      setFirebaseUser(null);
+      setCurrentUser(CURRENT_USER);
+      setActiveProfileViewUser(CURRENT_USER);
+      showToast('Signed out. Restored demo profile.', 'info');
+    } catch (err: any) {
+      console.error(err);
+      showToast('Failed to sign out', 'error');
+    }
+  };
+
   // Sync state to local storage
   useEffect(() => {
     localStorage.setItem('kuro_current_user', JSON.stringify(currentUser));
@@ -363,6 +476,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setLibrary(updatedLibrary);
 
+    // Sync to Firestore
+    const targetEntry = existing ? { ...existing, ...entryData, updatedAt: now } : updatedLibrary[0];
+    if (targetEntry) {
+      saveLibraryEntryToFirestore(currentUser.id, targetEntry).catch(() => {});
+    }
+
     // Create Social Activity
     if (media) {
       const statusLabel = entryData.status || 'watching';
@@ -392,6 +511,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const removeLibraryEntry = (mediaId: string) => {
     const media = getMediaById(mediaId);
     setLibrary(prev => prev.filter(item => !(item.mediaId === mediaId && item.userId === currentUser.id)));
+    removeLibraryEntryFromFirestore(currentUser.id, mediaId).catch(() => {});
     showToast(`Removed "${media?.title || 'Title'}" from your library`, 'info');
   };
 
@@ -543,6 +663,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // Filter out previous review by same user for this title
     setReviews(prev => [newReview, ...prev.filter(r => !(r.mediaId === media.id && r.userId === currentUser.id))]);
+    saveReviewToFirestore(newReview).catch(() => {});
 
     // Update library entry score if present
     const entry = getLibraryEntry(media.id);
@@ -640,6 +761,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       } : undefined
     };
     setTopics(prev => [newTopic, ...prev]);
+    saveTopicToFirestore(newTopic).catch(() => {});
     showToast('Discussion thread created!');
   };
 
@@ -913,7 +1035,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         triggerCelebration,
         stats,
         toast,
-        showToast
+        showToast,
+        firebaseUser,
+        signInWithGoogleAction,
+        signOutAction,
+        isFirebaseLoading
       }}
     >
       {children}

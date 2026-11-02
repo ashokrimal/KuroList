@@ -1,0 +1,114 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public and private profile settings, gamification level, XP, and stats for a user",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "username": { "type": "string", "description": "Unique community username" },
+        "displayName": { "type": "string", "description": "Public display name" },
+        "avatarUrl": { "type": "string", "description": "URL to user avatar" },
+        "bannerUrl": { "type": "string", "description": "URL to user banner image" },
+        "bio": { "type": "string", "description": "Short bio or favorite quote" },
+        "country": { "type": "string", "description": "Country of residence" },
+        "joinedDate": { "type": "string", "description": "Date user registered" },
+        "level": { "type": "number", "description": "Current gamification level" },
+        "xp": { "type": "number", "description": "Current experience points" },
+        "badges": { "type": "array", "description": "Unlocked badge IDs" },
+        "animeWatchedCount": { "type": "number", "description": "Total completed anime" },
+        "mangaReadCount": { "type": "number", "description": "Total completed manga" },
+        "episodesWatched": { "type": "number", "description": "Total episodes watched" },
+        "chaptersRead": { "type": "number", "description": "Total chapters read" },
+        "daysWatched": { "type": "number", "description": "Estimated watch time in days" },
+        "meanScore": { "type": "number", "description": "Average rating given by user" },
+        "isPublic": { "type": "boolean", "description": "Whether user collection is public" },
+        "updatedAt": { "type": "string", "description": "Last updated timestamp" }
+      },
+      "required": ["uid", "username", "displayName"]
+    },
+    "LibraryEntry": {
+      "title": "LibraryEntry",
+      "description": "Tracked anime or manga item in a user's personal collection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique entry identifier" },
+        "userId": { "type": "string", "description": "Owner user UID" },
+        "mediaId": { "type": "string", "description": "Referenced anime or manga ID" },
+        "title": { "type": "string", "description": "Romaji / English title" },
+        "format": { "type": "string", "enum": ["ANIME", "MANGA", "MANHWA", "NOVEL"] },
+        "status": { "type": "string", "enum": ["CURRENT", "COMPLETED", "PAUSED", "DROPPED", "PLANNING"] },
+        "progress": { "type": "number", "description": "Current episode or chapter" },
+        "totalProgress": { "type": "number", "description": "Total episodes or chapters" },
+        "volumesProgress": { "type": "number", "description": "Volume progress if manga" },
+        "score": { "type": "number", "description": "Rating score from 1-10" },
+        "isFavorite": { "type": "boolean", "description": "Whether marked as favorite" },
+        "notes": { "type": "string", "description": "Personal viewer notes" },
+        "startDate": { "type": "string", "description": "Start date" },
+        "finishDate": { "type": "string", "description": "Finish date" },
+        "coverImage": { "type": "string", "description": "Poster image URL" },
+        "updatedAt": { "type": "string", "description": "Last updated timestamp" }
+      },
+      "required": ["userId", "mediaId", "title", "status"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "User written critique and score for an anime or manga",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique review identifier" },
+        "userId": { "type": "string", "description": "Author UID" },
+        "userName": { "type": "string", "description": "Author display name" },
+        "userAvatar": { "type": "string", "description": "Author avatar URL" },
+        "mediaId": { "type": "string", "description": "Reviewed media ID" },
+        "mediaTitle": { "type": "string", "description": "Title of reviewed media" },
+        "mediaType": { "type": "string", "description": "Anime or Manga" },
+        "mediaCover": { "type": "string", "description": "Cover thumbnail URL" },
+        "score": { "type": "number", "description": "Rating out of 10" },
+        "summary": { "type": "string", "description": "One line verdict" },
+        "content": { "type": "string", "description": "Full markdown review" },
+        "containsSpoilers": { "type": "boolean", "description": "Spoiler flag" },
+        "likes": { "type": "number", "description": "Community upvotes" },
+        "createdAt": { "type": "string", "description": "Publication timestamp" }
+      },
+      "required": ["userId", "mediaId", "mediaTitle", "score", "content"]
+    },
+    "CommunityTopic": {
+      "title": "CommunityTopic",
+      "description": "Discussion forum thread or episode reaction topic",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Topic ID" },
+        "userId": { "type": "string", "description": "Author UID" },
+        "userName": { "type": "string", "description": "Author name" },
+        "userAvatar": { "type": "string", "description": "Author avatar" },
+        "title": { "type": "string", "description": "Thread subject" },
+        "category": { "type": "string", "description": "Category or genre" },
+        "content": { "type": "string", "description": "Thread body text" },
+        "likes": { "type": "number", "description": "Number of likes" },
+        "replyCount": { "type": "number", "description": "Number of replies" },
+        "tags": { "type": "array", "description": "Associated tags" },
+        "createdAt": { "type": "string", "description": "Created timestamp" }
+      },
+      "required": ["userId", "title", "category", "content"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile, public bio, stats, and gamification credentials"
+    },
+    "/users/{userId}/library/{entryId}": {
+      "schema": "LibraryEntry",
+      "description": "User personal anime/manga tracking list and progress"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Public community reviews and ratings"
+    },
+    "/communityTopics/{topicId}": {
+      "schema": "CommunityTopic",
+      "description": "Community discussion threads and topics"
+    }
+  }
+}
