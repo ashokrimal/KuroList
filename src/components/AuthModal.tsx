@@ -19,6 +19,9 @@ export const AuthModal: React.FC = () => {
     showToast,
     firebaseUser,
     signInWithGoogleAction,
+    signInWithEmailAction,
+    signUpWithEmailAction,
+    resetPasswordAction,
     signOutAction,
     isFirebaseLoading
   } = useApp();
@@ -29,28 +32,54 @@ export const AuthModal: React.FC = () => {
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
+  const [showForgotPass, setShowForgotPass] = useState(false);
 
   if (!isAuthModalOpen) return null;
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !displayName.trim()) return;
+    if (!email.trim() || !password.trim()) {
+      showToast('Please enter both email and password.', 'error');
+      return;
+    }
+    if (password.length < 6) {
+      showToast('Password must be at least 6 characters.', 'error');
+      return;
+    }
+    const safeUsername = username.trim() || email.split('@')[0];
+    const safeDisplayName = displayName.trim() || safeUsername;
 
-    updateCurrentUser({
-      username: username.toLowerCase().replace(/\s+/g, '_'),
-      displayName: displayName.trim(),
-      email: email.trim() || `${username.toLowerCase()}@kurolist.app`,
-      bio: bio.trim() || 'New member of the KuroList anime community.'
-    });
-
-    setIsAuthModalOpen(false);
-    showToast(`Welcome to KuroList, ${displayName}!`);
+    try {
+      await signUpWithEmailAction(email, password, safeUsername, safeDisplayName);
+    } catch {
+      // Handled in context toast
+    }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    showToast('Signed in successfully!');
-    setIsAuthModalOpen(false);
+    if (!email.trim() || !password.trim()) {
+      showToast('Please enter both email and password.', 'error');
+      return;
+    }
+    try {
+      await signInWithEmailAction(email, password);
+    } catch {
+      // Handled in context toast
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!email.trim()) {
+      showToast('Please enter your email address first.', 'error');
+      return;
+    }
+    try {
+      await resetPasswordAction(email);
+      setShowForgotPass(false);
+    } catch {
+      // Handled in context toast
+    }
   };
 
   return (
@@ -181,97 +210,179 @@ export const AuthModal: React.FC = () => {
               <div className="relative flex items-center justify-center my-3">
                 <div className="border-t border-[#2A2F45] w-full" />
                 <span className="bg-[#181A26] px-2 text-[11px] text-slate-500 uppercase tracking-wider">
-                  or email demo
+                  or email & password
                 </span>
                 <div className="border-t border-[#2A2F45] w-full" />
               </div>
 
-              <form onSubmit={handleLogin} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Email</label>
+              {!showForgotPass ? (
+                <form onSubmit={handleLogin} className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Email</label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={e => setEmail(e.target.value)}
+                        placeholder="you@domain.com"
+                        className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-slate-400">Password</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotPass(true)}
+                        className="text-[11px] text-indigo-400 hover:text-indigo-300"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="password"
+                        required
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isFirebaseLoading}
+                    className="w-full mt-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {isFirebaseLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    <span>Sign In</span>
+                  </button>
+                </form>
+              ) : (
+                <div className="space-y-3 p-3 bg-[#131520] rounded-xl border border-[#2A2F45]">
+                  <p className="text-xs text-slate-300">
+                    Enter your email to receive a password reset link:
+                  </p>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="email"
-                      required
                       value={email}
                       onChange={e => setEmail(e.target.value)}
                       placeholder="you@domain.com"
-                      className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white outline-none"
+                      className="w-full bg-[#181A26] border border-[#2A2F45] focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white outline-none"
                     />
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Password</label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="password"
-                      required
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white outline-none"
-                    />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotPass(false)}
+                      className="flex-1 py-2 bg-[#2A2F45]/50 hover:bg-[#2A2F45] text-slate-300 rounded-lg text-xs"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isFirebaseLoading}
+                      onClick={handleResetPassword}
+                      className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5"
+                    >
+                      {isFirebaseLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                      Send Reset Email
+                    </button>
                   </div>
                 </div>
-
-                <button
-                  type="submit"
-                  className="w-full mt-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/25 transition-colors"
-                >
-                  Sign In
-                </button>
-              </form>
+              )}
             </div>
           )}
 
           {mode === 'signup' && (
             <form onSubmit={handleRegister} className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Username</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Email</label>
                 <div className="relative">
-                  <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
-                    type="text"
+                    type="email"
                     required
-                    value={username}
-                    onChange={e => setUsername(e.target.value)}
-                    placeholder="otaku_explorer"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="you@domain.com"
                     className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white outline-none"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Display Name</label>
-                <input
-                  type="text"
-                  required
-                  value={displayName}
-                  onChange={e => setDisplayName(e.target.value)}
-                  placeholder="Ren Amamiya"
-                  className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                />
+                <label className="block text-xs font-medium text-slate-400 mb-1">Password</label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Username</label>
+                  <div className="relative">
+                    <User className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      value={username}
+                      onChange={e => setUsername(e.target.value)}
+                      placeholder="otaku_pro"
+                      className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl pl-8 pr-2 py-2 text-xs text-white outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Display Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={displayName}
+                    onChange={e => setDisplayName(e.target.value)}
+                    placeholder="Ren Amamiya"
+                    className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Short Bio</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Short Bio (Optional)</label>
                 <textarea
                   rows={2}
                   value={bio}
                   onChange={e => setBio(e.target.value)}
-                  placeholder="Tell the community about your favorite genres..."
+                  placeholder="Share your favorite anime or genres..."
                   className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl p-3 text-xs text-white outline-none resize-none"
                 />
               </div>
 
               <button
                 type="submit"
-                className="w-full mt-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/25 transition-colors"
+                disabled={isFirebaseLoading}
+                className="w-full mt-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
               >
-                Complete Onboarding
+                {isFirebaseLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                <span>Create Cloud Account</span>
               </button>
             </form>
           )}

@@ -2,7 +2,7 @@
  * KuroList - Main Application Context and State Management
  */
 
-import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
 import {
   UserProfile,
   LibraryEntry,
@@ -19,6 +19,7 @@ import {
   UserBadge
 } from '../types';
 import { calculateGamification } from '../utils/gamification';
+import { StreakState, getInitialStreakState, logStreakActivity } from '../utils/streak';
 import { INITIAL_MEDIA_ITEMS } from '../data/animeData';
 import { CURRENT_USER, INITIAL_USER_LIBRARY, OTHER_USERS } from '../data/mockUsers';
 import {
@@ -32,6 +33,11 @@ import { User as FirebaseUser } from 'firebase/auth';
 import {
   subscribeToAuth,
   signInWithGoogle,
+  loginWithEmail,
+  signUpWithEmail,
+  resetUserPassword,
+  updateUserPassword,
+  updateUserAuthProfile,
   signOutUser,
   saveUserProfile,
   saveLibraryEntryToFirestore,
@@ -40,6 +46,7 @@ import {
   saveReviewToFirestore,
   saveTopicToFirestore
 } from '../services/firebaseService';
+import { SyncUpdateItem, SyncAddItem } from '../utils/malSync';
 
 interface AppContextType {
   // Current user & profiles
@@ -49,12 +56,17 @@ interface AppContextType {
   setActiveProfileViewUser: (user: UserProfile) => void;
   switchUser: (user: UserProfile) => void;
   updateCurrentUser: (updates: Partial<UserProfile>) => void;
+  updateUserProfileDataAction: (data: { displayName?: string; username?: string; bio?: string; avatar?: string; banner?: string }) => Promise<void>;
+  updateUserPasswordAction: (newPassword: string) => Promise<void>;
   following: string[];
   toggleFollow: (userId: string) => void;
 
   // Firebase Auth
   firebaseUser: FirebaseUser | null;
   signInWithGoogleAction: () => Promise<void>;
+  signInWithEmailAction: (email: string, pass: string) => Promise<void>;
+  signUpWithEmailAction: (email: string, pass: string, username: string, displayName: string) => Promise<void>;
+  resetPasswordAction: (email: string) => Promise<void>;
   signOutAction: () => Promise<void>;
   isFirebaseLoading: boolean;
 
@@ -70,7 +82,13 @@ interface AppContextType {
   getLibraryEntry: (mediaId: string) => LibraryEntry | undefined;
   addOrUpdateLibraryEntry: (entry: Partial<LibraryEntry> & { mediaId: string; mediaType: MediaType }) => void;
   importBulkLibraryEntries: (entries: LibraryEntry[]) => void;
+  applySyncDiffAction: (toUpdate: SyncUpdateItem[], toAdd: SyncAddItem[]) => void;
   removeLibraryEntry: (mediaId: string) => void;
+  bulkUpdateLibraryEntries: (
+    mediaIds: string[],
+    updates: Partial<LibraryEntry> | ((entry: LibraryEntry) => Partial<LibraryEntry>)
+  ) => void;
+  bulkRemoveLibraryEntries: (mediaIds: string[]) => void;
   incrementProgress: (mediaId: string) => void;
   toggleFavorite: (mediaId: string) => void;
 
@@ -116,6 +134,8 @@ interface AppContextType {
   setIsAdminModalOpen: (open: boolean) => void;
   isNotificationsOpen: boolean;
   setIsNotificationsOpen: (open: boolean) => void;
+  isCommandPaletteOpen: boolean;
+  setIsCommandPaletteOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
 
   // Gamification & Progression System
   gamification: GamificationState;
@@ -150,6 +170,10 @@ interface AppContextType {
     genreCounts: { [genre: string]: number };
     scoreDistribution: { [score: number]: number };
   };
+
+  // Streak & Daily Tracking State
+  streak: StreakState;
+  recordDailyActivity: () => void;
 
   // Toast alert
   toast: { message: string; type: 'success' | 'info' | 'error' } | null;
@@ -211,8 +235,47 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
   });
 
-  // Navigation & Modals
-  const [activeView, setActiveView] = useState<'home' | 'discover' | 'seasonal' | 'mylist' | 'profile' | 'community' | 'collections'>('home');
+  // Navigation & Modals with URL Hash & Browser History Integration
+  const validViews = ['home', 'discover', 'seasonal', 'mylist', 'profile', 'community', 'collections'] as const;
+  type ValidViewType = typeof validViews[number];
+
+  const getInitialView = (): ValidViewType => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash.replace('#', '') as ValidViewType;
+      if (validViews.includes(hash)) {
+        return hash;
+      }
+    }
+    return 'home';
+  };
+
+  const [activeView, setActiveViewState] = useState<ValidViewType>(getInitialView);
+
+  const setActiveView = useCallback((view: ValidViewType) => {
+    setActiveViewState(view);
+    if (typeof window !== 'undefined' && window.location.hash !== `#${view}`) {
+      window.history.pushState({ view }, '', `#${view}`);
+    }
+  }, []);
+
+  // Listen for back/forward browser navigation & hash changes
+  useEffect(() => {
+    const handlePopState = () => {
+      const hash = window.location.hash.replace('#', '') as ValidViewType;
+      if (validViews.includes(hash)) {
+        setActiveViewState(hash);
+      } else {
+        setActiveViewState('home');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handlePopState);
+    };
+  }, []);
+
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [isAddToListOpen, setIsAddToListOpen] = useState(false);
   const [listModalMedia, setListModalMedia] = useState<MediaItem | null>(null);
@@ -222,7 +285,35 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
+
+  // Global Keyboard Shortcuts (Cmd+K / Ctrl+K, '/', Esc)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd+K or Ctrl+K opens command palette
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+        return;
+      }
+
+      // '/' opens search if not currently typing in an input or textarea
+      if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        e.preventDefault();
+        setIsCommandPaletteOpen(true);
+        return;
+      }
+
+      // Esc closes command palette
+      if (e.key === 'Escape' && isCommandPaletteOpen) {
+        setIsCommandPaletteOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isCommandPaletteOpen]);
 
   // Gamification celebration state
   const [isCelebrationOpen, setIsCelebrationOpen] = useState(false);
@@ -245,6 +336,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }) => {
     setCelebrationData(data);
     setIsCelebrationOpen(true);
+  };
+
+  // Streak tracking state
+  const [streak, setStreak] = useState<StreakState>(() => getInitialStreakState());
+
+  const recordDailyActivity = () => {
+    setStreak(prev => logStreakActivity(prev));
   };
 
   // Toast state
@@ -333,6 +431,70 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } catch (err: any) {
       console.error(err);
       showToast('Google sign-in was canceled or encountered an issue.', 'error');
+    } finally {
+      setIsFirebaseLoading(false);
+    }
+  };
+
+  const signInWithEmailAction = async (email: string, pass: string) => {
+    try {
+      setIsFirebaseLoading(true);
+      const user = await loginWithEmail(email, pass);
+      if (user) {
+        showToast(`Welcome back, ${user.displayName || user.email}!`);
+        setIsAuthModalOpen(false);
+      }
+    } catch (err: any) {
+      console.error(err);
+      let msg = 'Failed to sign in. Please verify your credentials.';
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        msg = 'Invalid email or password.';
+      } else if (err.code === 'auth/user-not-found') {
+        msg = 'No account found with this email. Please sign up.';
+      } else if (err.code === 'auth/too-many-requests') {
+        msg = 'Access temporarily restricted due to many failed attempts. Try again later.';
+      }
+      showToast(msg, 'error');
+      throw err;
+    } finally {
+      setIsFirebaseLoading(false);
+    }
+  };
+
+  const signUpWithEmailAction = async (email: string, pass: string, username: string, displayName: string) => {
+    try {
+      setIsFirebaseLoading(true);
+      const user = await signUpWithEmail(email, pass, displayName);
+      if (user) {
+        showToast(`Account created! Welcome to KuroList, ${displayName}!`);
+        setIsAuthModalOpen(false);
+      }
+    } catch (err: any) {
+      console.error(err);
+      let msg = 'Registration failed.';
+      if (err.code === 'auth/email-already-in-use') {
+        msg = 'An account with this email already exists. Try signing in.';
+      } else if (err.code === 'auth/weak-password') {
+        msg = 'Password should be at least 6 characters.';
+      } else if (err.code === 'auth/invalid-email') {
+        msg = 'Please enter a valid email address.';
+      }
+      showToast(msg, 'error');
+      throw err;
+    } finally {
+      setIsFirebaseLoading(false);
+    }
+  };
+
+  const resetPasswordAction = async (email: string) => {
+    try {
+      setIsFirebaseLoading(true);
+      await resetUserPassword(email);
+      showToast('Password reset link sent to your email!', 'info');
+    } catch (err: any) {
+      console.error(err);
+      showToast('Could not send reset email. Verify your address.', 'error');
+      throw err;
     } finally {
       setIsFirebaseLoading(false);
     }
@@ -475,6 +637,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     setLibrary(updatedLibrary);
+    setStreak(prev => logStreakActivity(prev));
 
     // Sync to Firestore
     const targetEntry = existing ? { ...existing, ...entryData, updatedAt: now } : updatedLibrary[0];
@@ -515,6 +678,58 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     showToast(`Removed "${media?.title || 'Title'}" from your library`, 'info');
   };
 
+  /**
+   * Bulk updates multiple library entries simultaneously
+   */
+  const bulkUpdateLibraryEntries = (
+    mediaIds: string[],
+    updates: Partial<LibraryEntry> | ((entry: LibraryEntry) => Partial<LibraryEntry>)
+  ) => {
+    if (mediaIds.length === 0) return;
+    const now = new Date().toISOString();
+    const updatedEntries: LibraryEntry[] = [];
+
+    setLibrary(prev => {
+      return prev.map(entry => {
+        if (entry.userId === currentUser.id && mediaIds.includes(entry.mediaId)) {
+          const patch = typeof updates === 'function' ? updates(entry) : updates;
+          const updated: LibraryEntry = {
+            ...entry,
+            ...patch,
+            updatedAt: now
+          };
+          updatedEntries.push(updated);
+          return updated;
+        }
+        return entry;
+      });
+    });
+
+    // Sync each to Firestore
+    updatedEntries.forEach(entry => {
+      saveLibraryEntryToFirestore(currentUser.id, entry).catch(() => {});
+    });
+
+    setStreak(prev => logStreakActivity(prev));
+    showToast(`Updated ${mediaIds.length} titles in your library`, 'success');
+  };
+
+  /**
+   * Bulk removes multiple library entries simultaneously
+   */
+  const bulkRemoveLibraryEntries = (mediaIds: string[]) => {
+    if (mediaIds.length === 0) return;
+
+    setLibrary(prev => prev.filter(item => !(item.userId === currentUser.id && mediaIds.includes(item.mediaId))));
+
+    // Delete each from Firestore
+    mediaIds.forEach(mediaId => {
+      removeLibraryEntryFromFirestore(currentUser.id, mediaId).catch(() => {});
+    });
+
+    showToast(`Removed ${mediaIds.length} titles from your library`, 'info');
+  };
+
   const incrementProgress = (mediaId: string) => {
     const entry = getLibraryEntry(mediaId);
     const media = getMediaById(mediaId);
@@ -542,6 +757,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     setLibrary(prev => prev.map(item => item.id === entry.id ? updatedEntry : item));
+    setStreak(prev => logStreakActivity(prev));
+
+    // Sync progress update directly to Firestore
+    saveLibraryEntryToFirestore(currentUser.id, updatedEntry).catch(() => {});
 
     // Award XP
     setCurrentUser(curr => ({
@@ -582,7 +801,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const entry = getLibraryEntry(mediaId);
     if (entry) {
       const updated = !entry.isFavorite;
-      setLibrary(prev => prev.map(item => item.id === entry.id ? { ...item, isFavorite: updated } : item));
+      const updatedEntry: LibraryEntry = {
+        ...entry,
+        isFavorite: updated,
+        updatedAt: new Date().toISOString()
+      };
+      setLibrary(prev => prev.map(item => item.id === entry.id ? updatedEntry : item));
+      saveLibraryEntryToFirestore(currentUser.id, updatedEntry).catch(() => {});
       showToast(updated ? 'Added to favorites' : 'Removed from favorites');
     }
   };
@@ -592,6 +817,118 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const existingOther = prev.filter(e => e.userId !== currentUser.id || !entries.some(ne => ne.mediaId === e.mediaId));
       return [...entries, ...existingOther];
     });
+
+    // Persist all imported entries to Firestore in cloud
+    entries.forEach(entry => {
+      saveLibraryEntryToFirestore(currentUser.id, entry).catch(() => {});
+    });
+    showToast(`Imported ${entries.length} titles to your cloud library!`, 'success');
+  };
+
+  /**
+   * Applies smart diff updates and additions from MAL/AniList sync
+   */
+  const applySyncDiffAction = (toUpdate: SyncUpdateItem[], toAdd: SyncAddItem[]) => {
+    const now = new Date().toISOString();
+
+    setLibrary(prev => {
+      let nextLib = [...prev];
+
+      // 1. Apply updates to existing entries
+      toUpdate.forEach(item => {
+        const idx = nextLib.findIndex(e => e.id === item.existingEntryId);
+        if (idx !== -1) {
+          const existing = nextLib[idx];
+          const updatedEntry: LibraryEntry = {
+            ...existing,
+            progress: item.newProgress,
+            status: item.newStatus,
+            score: item.newScore > 0 ? item.newScore : existing.score,
+            totalProgress: item.totalProgress || existing.totalProgress,
+            updatedAt: now
+          };
+          nextLib[idx] = updatedEntry;
+          saveLibraryEntryToFirestore(currentUser.id, updatedEntry).catch(() => {});
+        }
+      });
+
+      // 2. Add new entries
+      toAdd.forEach((item, i) => {
+        const newEntry: LibraryEntry = {
+          id: `lib_sync_${Date.now()}_${i}`,
+          userId: currentUser.id,
+          mediaId: item.mediaId,
+          mediaType: item.mediaType,
+          status: item.status,
+          progress: item.progress,
+          totalProgress: item.totalProgress,
+          volumesRead: 0,
+          score: item.score,
+          notes: item.notes || 'Synced from MAL/AniList',
+          isFavorite: item.score >= 9,
+          startDate: now.split('T')[0],
+          createdAt: now,
+          updatedAt: now
+        };
+        nextLib = [newEntry, ...nextLib];
+        saveLibraryEntryToFirestore(currentUser.id, newEntry).catch(() => {});
+      });
+
+      return nextLib;
+    });
+
+    setStreak(prev => logStreakActivity(prev));
+
+    // Calculate XP boost for syncing
+    const xpBoost = (toUpdate.length * 20) + (toAdd.length * 40);
+    if (xpBoost > 0) {
+      setCurrentUser(curr => ({
+        ...curr,
+        xp: curr.xp + xpBoost
+      }));
+    }
+
+    showToast(`Sync complete: ${toUpdate.length} titles updated, ${toAdd.length} new titles added! (+${xpBoost} XP)`, 'success');
+  };
+
+  /**
+   * Updates current user profile details (displayName, username, bio, avatar, banner)
+   */
+  const updateUserProfileDataAction = async (data: {
+    displayName?: string;
+    username?: string;
+    bio?: string;
+    avatar?: string;
+    banner?: string;
+  }): Promise<void> => {
+    const updatedUser: UserProfile = {
+      ...currentUser,
+      displayName: data.displayName !== undefined ? data.displayName.trim() : currentUser.displayName,
+      username: data.username !== undefined ? data.username.trim().replace(/^@/, '') : currentUser.username,
+      bio: data.bio !== undefined ? data.bio : currentUser.bio,
+      avatar: data.avatar || currentUser.avatar,
+      banner: data.banner || currentUser.banner
+    };
+
+    setCurrentUser(updatedUser);
+    setActiveProfileViewUser(updatedUser);
+    localStorage.setItem('kuro_current_user', JSON.stringify(updatedUser));
+
+    // Save to Firestore and Auth if signed in
+    if (firebaseUser) {
+      await saveUserProfile(updatedUser).catch(err => console.warn('Could not save user profile to firestore:', err));
+      await updateUserAuthProfile(updatedUser.displayName, updatedUser.avatar).catch(err => console.warn('Could not update auth profile:', err));
+    }
+
+    showToast('Profile information updated successfully!', 'success');
+  };
+
+  /**
+   * Updates user password via Firebase Auth
+   */
+  const updateUserPasswordAction = async (newPassword: string): Promise<void> => {
+    await updateUserPassword(newPassword);
+    showToast('Password updated successfully! Keep your new credentials safe.', 'success');
   };
 
   // Social interactions
@@ -978,6 +1315,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setActiveProfileViewUser,
         switchUser,
         updateCurrentUser,
+        updateUserProfileDataAction,
+        updateUserPasswordAction,
         following,
         toggleFollow,
         mediaItems,
@@ -988,7 +1327,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         getLibraryEntry,
         addOrUpdateLibraryEntry,
         importBulkLibraryEntries,
+        applySyncDiffAction,
         removeLibraryEntry,
+        bulkUpdateLibraryEntries,
+        bulkRemoveLibraryEntries,
         incrementProgress,
         toggleFavorite,
         activities,
@@ -1028,16 +1370,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setIsAdminModalOpen,
         isNotificationsOpen,
         setIsNotificationsOpen,
+        isCommandPaletteOpen,
+        setIsCommandPaletteOpen,
         gamification,
         celebrationData,
         isCelebrationOpen,
         setIsCelebrationOpen,
         triggerCelebration,
         stats,
+        streak,
+        recordDailyActivity,
         toast,
         showToast,
         firebaseUser,
         signInWithGoogleAction,
+        signInWithEmailAction,
+        signUpWithEmailAction,
+        resetPasswordAction,
         signOutAction,
         isFirebaseLoading
       }}

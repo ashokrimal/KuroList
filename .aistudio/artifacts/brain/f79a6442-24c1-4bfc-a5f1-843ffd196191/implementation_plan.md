@@ -1,98 +1,94 @@
-# KuroList — Platform Tour & Verification Plan
+# Relocate Streak Counter to Profile Page & UI/UX Memory Alignment
 
-A complete, production-ready anime and manga tracking social platform combining the best of MyAnimeList, AniList, and Letterboxd with a premium dark interface, gamified leveling, and ColorOS/iOS-inspired Aqua Dynamics floating shortcuts.
+Relocate the visual active tracking streak counter from the home dashboard to the user profile overview page, ensuring the home page remains focused on discovery, continue tracking, and trending releases while the profile page serves as the centralized personal identity and habit tracking hub.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> Both user preferences have been confirmed and are locked in:
-> 1. **Tour & Test Direction**: Focus on guided interactive verification and testing across all primary flows (Tracking, Gamification, Streaming Links, Social Feed, Discovery, and Identity Card).
-> 2. **Profile & Demo State**: Retain the complete pre-seeded identity for Ashok Rimal (`@ashokrimal`, Otaku Sovereign Level 8, 4,890 XP, curated anime/manga lists, custom collections, and earned badges) alongside real-time search and Jikan API fallbacks.
+> The following architectural and layout decisions have been confirmed through user clarification:
+
+- **Confirmed Decision 1**: The streak counter will be placed as a prominent habit card inside the **Profile Overview tab** alongside personal statistics and dynamic milestone counters.
+- **Confirmed Decision 2**: The streak counter (both full card and compact badge) will be **completely removed from the home page**, maintaining a clean, editorial homepage focused on featured titles and continue tracking.
+- **Confirmed Decision 3**: UI/UX Master Prompt guidelines from the provided PDF specification will be permanently documented in an updated memory reference (`UI_UX_SPECIFICATION.md`) for architectural consistency.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does**: KuroList is a dark-first social tracking hub where users discover, log, score, and share their anime and manga journeys. It features real-time XP calculation, 15 unlockable badges, a floating frosted Aqua Dynamics pill dock, direct links to 6 major streaming portals, 2-way MAL/AniList synchronizer, and zero-pill typographic metadata styling.
-- **Target Persona**: Dedicated anime watchers, manga readers, and community curators who want a fast, tactile platform that celebrates their viewing identity.
-- **Key Value**: Replaces clunky, retro tracking tables with an ultra-responsive web application that feels like a native mobile app on handhelds and a cinematic dashboard on wide displays.
+- **What It Does**: Moves the interactive `StreakCounterCard` (consecutive days tracked, daily episode/chapter progress bar, and 7-day visual week history) from `HomeView.tsx` into `ProfileView.tsx`. In the Profile Overview tab, users will now see their active habit streak alongside their level XP, episodes watched, chapters read, and badges.
+- **Target Audience / Persona**: Anime & manga fans who take pride in daily tracking habits, profile customization, and gamification progression.
+- **Key Value**: Streamlines the home page to focus strictly on content discovery, watchlist resumption, and seasonal recommendations, while centralizing all habit, streak, XP, and milestone metrics in the user's personal profile space.
 
 ---
 
 ## 2. User Experience & Visual Design
 
 ### Key User Flows
-1. **Interactive Guided Tour & Quick Logging**:
-   - Access the floating pill dock at the bottom of the screen.
-   - Tap **⚡ Quick +1 Ep** on the floating pill dock to log an episode of an active series directly, triggering instant +15 XP gain, toast feedback, and level progress bar updates.
-2. **Library Management & Skeleton Loading**:
-   - Navigate to **My List** to test Anime/Manga switching, status filters (*Watching, Completed, On Hold, Dropped, Plan to Watch*), and Grid vs. Table views.
-   - Experience the zero-flicker shimmer skeleton transition while data organizes.
-3. **Stream Launcher & 2-Way Sync**:
-   - Open any anime detail modal or click **Stream & Sync** in the floating pill dock.
-   - Test one-click external search & launch for **Crunchyroll**, **Netflix**, **Aniwave**, **HiAnime**, **Hanime**, and **Anikoto**.
-   - Test MAL / AniList export or 2-way simulated sync.
-4. **Gamification & Identity Card**:
-   - Visit the **Profile** view to inspect Ashok Rimal's Level 8 milestone banner, XP progression bar, and 15 tiered achievement badges.
-   - Open the **Anime Identity Card** to preview and copy the celestial share card showing rank, personality archetype, and top 3 spotlight posters.
+1. **Home Experience**:
+   - The user opens KuroList and lands on a focused, cinematic home dashboard.
+   - The hero banner displays clean title metadata, rating, studio, and action CTAs without streak pill distractions.
+   - The dashboard transitions directly into *Continue Tracking* shelf and full-width *Trending Anime & Manga* showcases.
+2. **Profile Experience**:
+   - Navigating to **Profile** (via top avatar dropdown or bottom navigation tab) reveals the user's banner, avatar, level, and XP progression.
+   - Under the Overview tab, right alongside the milestone counters, the user sees their **Active Habit Streak Card**:
+     - Animated amber/orange glowing flame badge (`Flame`)
+     - Consecutive active days count (e.g. *6 Days Streak* with *On Fire* badge)
+     - Real-time daily goal progress bar (`X / 3 logged today`)
+     - 7-day rolling calendar track (Mon–Sun) with completion checkmarks and today's active ring
+     - Personal best counter (*Longest Streak*)
 
-### Visual Identity & Theme
-- **Color Tokens**:
-  - Background: `#0F1016` (deep obsidian canvas)
-  - Cards & Containers: `#181A26` with subtle single-elevation `#2A2F45` borders
-  - Accents: `#6366F1` (Indigo), `#8B5CF6` (Violet), `#EC4899` (Pink/Rose)
-- **Typography & Anti-Slop Discipline**:
-  - Headers & Display: Plus Jakarta Sans with bold weights
-  - Technical Counters: JetBrains Mono for episode numbers, scores, and XP chips
-  - Metadata: Zero static pill badges; unboxed text separated with subtle `·` glyphs
-- **Responsive Adaptability**:
-  - Desktop: 3-column dashboard with cinematic hero banner and live social feed
-  - Mobile: Aqua Dynamics floating pill dock with safe-area spacing and touch-optimized action sheets
+### Visual Identity & Theme Tokens
+- **Backgrounds**: Deep obsidian surfaces (`#181A26` and `#131520`) with subtle border lines (`#2A2F45`).
+- **Accents**: Warm amber/orange glow (`#F59E0B`, `#EA580C`) for fire and streaks; indigo accents (`#6366F1`) for primary actions.
+- **Typography & Hierarchy**: Clean unboxed typography conforming to the Zero-Pill discipline (§1.A).
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Client-Side Reactive Storage with Jikan API Fallback**
-  - *Chosen Approach*: Persist all user library edits, comments, likes, and XP gains in reactive `localStorage`, supplemented by live live Jikan API queries for real-time external title discovery.
-  - *Why*: Instantaneous sub-10ms UI updates without server latency or broken keys, while allowing users to search titles outside the initial database.
-- **Decision 2: Floating Pill Dock (ColorOS 17 & iOS Native Feel)**
-  - *Chosen Approach*: Persistent frosted pill navbar anchored at the bottom center with an expandable shortcuts sheet and quick-logger stepper.
-  - *Why*: Maximizes thumb-reach accessibility on mobile screens while preserving clean viewport space on desktop.
-- **Decision 3: Tiered Gamification Curve**
-  - *Chosen Approach*: Weighted XP formula with milestone thresholds every level and distinct badge tiers (Bronze, Silver, Gold, Platinum).
-  - *Why*: Rewards varied engagement (reading, bingeing, reviewing, and curating) rather than just passive watching.
+- **Decision 1: Relocating Streak Counter from Home to Profile**:
+  - *Chosen Approach*: Completely remove `StreakCounterCard` from `HomeView.tsx` (both the hero metadata chip and the section card) and render it in `ProfileView.tsx` within the Overview tab.
+  - *Why*: Aligns with the UI/UX specification where the homepage is dedicated to discovery and continue watching, while the profile page is the primary personal showcase for habits, stats, and identity.
+  - *Alternatives Considered*: Keeping a compact flame pill in the hero banner was rejected per user preference to keep the homepage 100% clean.
+
+- **Decision 2: UI/UX Guidelines Documentation**:
+  - *Chosen Approach*: Create a persistent specification reference `UI_UX_SPECIFICATION.md` detailing the visual principles, color tokens, layout hierarchy, and component rules from the MAL NextGen UI/UX Master Prompt.
+  - *Why*: Prevents regression on future turns and locks in design standards (no pill wrappers around metadata, no activity on home page, touch targets $\ge 44\text{px}$, haptic triggers).
 
 ---
 
 ## 4. Technical Architecture & Component Flow
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                          App Shell (App.tsx)                           │
-├──────────────────┬─────────────────────────────────┬───────────────────┤
-│ Top Navbar       │ Main View Router                │ Floating Pill Dock│
-│ - Brand Logo     │ - HomeView (Hero + Feed)        │ - Quick View Nav  │
-│ - XP/Level Chip  │ - DiscoverView (Search + Filter)│ - Quick +1 Logger │
-│ - Search Bar     │ - MyListView (Table / Grid)     │ - Identity Card   │
-│ - Stream/Sync    │ - ProfileView (Gamification)    │ - Stream Sync Hub │
-│ - User Switcher  │ - Calendar & Community Views    │ - Surprise Me     │
-└────────┬─────────┴────────────────┬────────────────┴─────────┬─────────┘
-         │                          │                          │
-         ▼                          ▼                          ▼
-┌──────────────────┐      ┌──────────────────┐       ┌──────────────────┐
-│  Modal Overlays  │      │ Skeleton Loaders │       │ State Engine     │
-│ - AnimeDetail    │      │ - HomeSkeleton   │       │ - AppContext     │
-│ - AddToList      │      │ - DiscoverSkel   │       │ - Gamification   │
-│ - StreamingSync  │      │ - MyListSkel     │       │ - LocalStorage   │
-│ - LevelUpModal   │      │ - CardSkeleton   │       │ - Live Toasts    │
-└──────────────────┘      └──────────────────┘       └──────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                       AppContext                            │
+│  - streak: StreakState (consecutive days, daily goal, days) │
+│  - library: LibraryEntry[]                                   │
+│  - incrementProgress() -> updates library & logs streak      │
+└──────────────┬───────────────────────────────┬──────────────┘
+               │                               │
+               ▼                               ▼
+       ┌───────────────┐              ┌────────────────┐
+       │   HomeView    │              │  ProfileView   │
+       │ (Cleaned Up)  │              │ (Overview Tab) │
+       ├───────────────┤              ├────────────────┤
+       │ - Hero Banner │              │ - Banner/Avatar│
+       │ - Continue    │              │ - Level & XP   │
+       │   Tracking    │              │ - Streak Card  │
+       │ - Trending    │              │   (🔥 6 Days)  │
+       │   Grids       │              │ - Stats Strip  │
+       └───────────────┘              │ - Favorites    │
+                                      └────────────────┘
 ```
 
-### Verification & Testing Checklist
-- [x] Compilation & TypeScript typing verification (`tsc --noEmit` and Vite build).
-- [x] Initial demo profile configured with Ashok Rimal, Level 8, 4,890 XP, badges, and watchlist.
-- [x] Floating Pill Dock shortcuts operational (+1 episode increment, streaming sync, randomizer).
-- [x] Shimmer skeleton screens display on Home, Discover, and MyList views.
-- [x] External streaming links generate correct search queries for Crunchyroll, Netflix, Aniwave, HiAnime, Hanime, and Anikoto.
-- [x] 2-way sync simulation and JSON backup exports working.
+### Component & State Changes:
+1. `src/views/HomeView.tsx`:
+   - Remove `StreakCounterCard` import.
+   - Remove `<StreakCounterCard streak={streak} compact />` from the hero metadata line.
+   - Remove the Section 2 `<StreakCounterCard streak={streak} />` block.
+2. `src/views/ProfileView.tsx`:
+   - Import `StreakCounterCard` from `../components/StreakCounterCard`.
+   - Access `streak` from `useApp()`.
+   - In the `activeTab === 'overview'` section (when viewing one's own profile `isSelf`), render `StreakCounterCard` prominently directly above or alongside the favorite media section and recent activity.
+3. `UI_UX_SPECIFICATION.md`:
+   - Document the core design philosophy, color system tokens, layout hierarchy, and interaction rules from the master prompt for memory persistence.

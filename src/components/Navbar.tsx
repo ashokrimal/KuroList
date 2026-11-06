@@ -18,9 +18,11 @@ import {
   LogOut,
   UserCheck,
   ChevronDown,
-  Tv
+  Tv,
+  Layers
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface NavbarProps {
   onOpenSyncModal?: () => void;
@@ -41,14 +43,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSyncModal }) => {
     setSelectedMedia,
     searchMedia,
     openAddToListModal,
-    gamification
+    gamification,
+    setIsCommandPaletteOpen
   } = useApp();
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const searchRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Close menus on outside click
@@ -57,26 +56,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSyncModal }) => {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
         setIsUserMenuOpen(false);
       }
-      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
-        setIsSearchOpen(false);
-      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  // Handle instant search
-  useEffect(() => {
-    if (searchQuery.trim().length > 1) {
-      searchMedia(searchQuery).then(results => {
-        setSearchResults(results.slice(0, 5));
-        setIsSearchOpen(true);
-      });
-    } else {
-      setSearchResults([]);
-      setIsSearchOpen(false);
-    }
-  }, [searchQuery]);
 
   return (
     <header className="sticky top-0 z-40 w-full bg-[#0F1016]/85 backdrop-blur-md border-b border-[#2A2F45]/60 transition-colors">
@@ -128,76 +111,50 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSyncModal }) => {
           </button>
           <button
             onClick={() => setActiveView('community')}
-            className={`transition-colors whitespace-nowrap shrink-0 hover:text-white flex items-center gap-1.5 ${
+            className={`transition-colors whitespace-nowrap shrink-0 hover:text-white flex items-center gap-1.5 cursor-pointer ${
               activeView === 'community' ? 'text-indigo-400 font-semibold' : ''
             }`}
           >
             <Users className="w-4 h-4" />
             Community
           </button>
+          <button
+            onClick={() => setActiveView('collections')}
+            className={`transition-colors whitespace-nowrap shrink-0 hover:text-white flex items-center gap-1.5 cursor-pointer ${
+              activeView === 'collections' ? 'text-indigo-400 font-semibold' : ''
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+            Collections
+          </button>
         </nav>
 
         {/* Zone 3: Search, Notification, Identity Card & User Profile */}
-        <div className="flex items-center gap-3 shrink-0">
-          {/* Quick Search Bar */}
-          <div ref={searchRef} className="relative hidden sm:block w-48 md:w-64">
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Search anime, manga..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                onFocus={() => searchQuery.length > 1 && setIsSearchOpen(true)}
-                className="w-full bg-[#181A26] border border-[#2A2F45] focus:border-indigo-500 text-xs text-white rounded-lg pl-9 pr-3 py-2 outline-none transition-colors placeholder:text-slate-500"
-              />
-            </div>
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Mobile Search Button (< sm) */}
+          <button
+            type="button"
+            onClick={() => setIsCommandPaletteOpen(true)}
+            className="sm:hidden p-2 text-slate-400 hover:text-white hover:bg-[#181A26] rounded-lg transition-colors cursor-pointer"
+            aria-label="Open Search and Command Palette"
+            title="Search anime and manga"
+          >
+            <Search className="w-4 h-4" />
+          </button>
 
-            {/* Instant Search Dropdown */}
-            {isSearchOpen && searchResults.length > 0 && (
-              <div className="absolute left-0 right-0 mt-2 bg-[#181A26] border border-[#2A2F45] rounded-xl shadow-2xl overflow-hidden z-50">
-                <div className="p-2 divide-y divide-[#2A2F45]/50">
-                  {searchResults.map(item => (
-                    <div
-                      key={item.id}
-                      onClick={() => {
-                        setSelectedMedia(item);
-                        setIsSearchOpen(false);
-                        setSearchQuery('');
-                      }}
-                      className="p-2 flex items-center gap-3 hover:bg-[#1F2335] rounded-lg cursor-pointer transition-colors"
-                    >
-                      <img
-                        src={item.coverImage}
-                        alt={item.title}
-                        onError={e => {
-                          (e.currentTarget as HTMLImageElement).src = '/src/assets/images/anime_card_nebula_1793517807647.jpg';
-                        }}
-                        className="w-10 h-14 object-cover rounded shrink-0 bg-slate-800"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs font-semibold text-white truncate">{item.title}</div>
-                        <div className="text-[11px] text-slate-400">
-                          {item.format} · {item.genres?.slice(0, 2).join(', ')} · ★ {item.score}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="p-2 border-t border-[#2A2F45] bg-[#131520] text-center">
-                  <button
-                    onClick={() => {
-                      setActiveView('discover');
-                      setIsSearchOpen(false);
-                    }}
-                    className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
-                  >
-                    View all discovery results
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Desktop Spotlight Search Launcher Bar */}
+          <button
+            type="button"
+            onClick={() => setIsCommandPaletteOpen(true)}
+            className="relative hidden sm:flex items-center gap-2.5 w-48 md:w-64 bg-[#181A26] hover:bg-[#1F2335] border border-[#2A2F45] hover:border-indigo-500/50 text-xs text-slate-400 hover:text-slate-200 rounded-lg pl-3 pr-2.5 py-2 transition-all group text-left cursor-pointer"
+            title="Search anime, manga, and quick commands (Press Cmd+K or /)"
+          >
+            <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-400 transition-colors shrink-0" />
+            <span className="truncate flex-1">Search anime, manga...</span>
+            <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[#10121C] border border-[#2A2F45] text-[10px] font-mono text-slate-400 group-hover:text-indigo-300">
+              ⌘K
+            </kbd>
+          </button>
 
           {/* Stream & MAL Sync Hub Trigger */}
           {onOpenSyncModal && (
@@ -210,6 +167,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSyncModal }) => {
               <span>Stream & Sync</span>
             </button>
           )}
+
+          {/* PWA Install Button */}
+          <PWAInstallButton />
 
           {/* Anime Identity Card Trigger */}
           <button
@@ -286,10 +246,20 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSyncModal }) => {
                       setActiveView('mylist');
                       setIsUserMenuOpen(false);
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-300 hover:text-white hover:bg-[#1F2335] rounded-lg transition-colors text-left"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-300 hover:text-white hover:bg-[#1F2335] rounded-lg transition-colors text-left cursor-pointer"
                   >
                     <Bookmark className="w-4 h-4 text-slate-400" />
                     Manage Watchlist & Manga
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveView('collections');
+                      setIsUserMenuOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-300 hover:text-white hover:bg-[#1F2335] rounded-lg transition-colors text-left cursor-pointer"
+                  >
+                    <Layers className="w-4 h-4 text-slate-400" />
+                    Curated Collections
                   </button>
 
                   {/* Switch to other demo users */}

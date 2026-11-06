@@ -6,7 +6,6 @@
 import React, { useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
-import { MobileBottomNav } from './components/MobileBottomNav';
 import { AnimeDetailModal } from './components/AnimeDetailModal';
 import { AddToListModal } from './components/AddToListModal';
 import { AnimeIdentityCardModal } from './components/AnimeIdentityCardModal';
@@ -15,9 +14,10 @@ import { AuthModal } from './components/AuthModal';
 import { AdminModal } from './components/AdminModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import { LevelUpCelebrationModal } from './components/LevelUpCelebrationModal';
-import { FloatingPillDock } from './components/FloatingPillDock';
+import { AndroidBottomNav } from './components/AndroidBottomNav';
 import { StreamingSyncModal } from './components/StreamingSyncModal';
-import { DynamicPillBar } from './components/DynamicPillBar';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { CommandPaletteModal } from './components/CommandPaletteModal';
 
 // Views
 import { HomeView } from './views/HomeView';
@@ -26,6 +26,7 @@ import { SeasonalCalendarView } from './views/SeasonalCalendarView';
 import { MyListView } from './views/MyListView';
 import { ProfileView } from './views/ProfileView';
 import { CommunityView } from './views/CommunityView';
+import { CollectionsView } from './views/CollectionsView';
 
 const MainLayout: React.FC = () => {
   const {
@@ -58,20 +59,23 @@ const MainLayout: React.FC = () => {
         </div>
       )}
 
-      {/* Dynamic Action Pill Bar (Above Navbar) */}
-      <DynamicPillBar onOpenSyncModal={() => setIsSyncModalOpen(true)} />
-
       {/* Top Navbar */}
       <Navbar onOpenSyncModal={() => setIsSyncModalOpen(true)} />
 
-      {/* Main View Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-20 md:pb-12">
-        {activeView === 'home' && <HomeView />}
-        {activeView === 'discover' && <DiscoverView />}
-        {activeView === 'seasonal' && <SeasonalCalendarView />}
-        {activeView === 'mylist' && <MyListView />}
-        {activeView === 'profile' && <ProfileView />}
-        {activeView === 'community' && <CommunityView />}
+      {/* Offline Status & Cache Notice Banner */}
+      <OfflineIndicator />
+
+      {/* Main View Area with Dynamic Fluid Flow */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-24 md:pb-12">
+        <div key={activeView} className="animate-in fade-in zoom-in-[0.99] duration-150">
+          {activeView === 'home' && <HomeView />}
+          {activeView === 'discover' && <DiscoverView />}
+          {activeView === 'seasonal' && <SeasonalCalendarView />}
+          {activeView === 'mylist' && <MyListView />}
+          {activeView === 'profile' && <ProfileView />}
+          {activeView === 'community' && <CommunityView />}
+          {activeView === 'collections' && <CollectionsView />}
+        </div>
       </main>
 
       {/* Quiet, Anti-Slop Footer (§1.B) */}
@@ -84,24 +88,27 @@ const MainLayout: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-6 text-slate-400">
-            <button onClick={() => setActiveView('discover')} className="hover:text-white transition-colors">
+            <button onClick={() => setActiveView('discover')} className="hover:text-white transition-colors cursor-pointer">
               Discover
             </button>
-            <button onClick={() => setActiveView('seasonal')} className="hover:text-white transition-colors">
+            <button onClick={() => setActiveView('seasonal')} className="hover:text-white transition-colors cursor-pointer">
               Schedule
             </button>
-            <button onClick={() => setActiveView('mylist')} className="hover:text-white transition-colors">
+            <button onClick={() => setActiveView('mylist')} className="hover:text-white transition-colors cursor-pointer">
               My Library
             </button>
-            <button onClick={() => setActiveView('community')} className="hover:text-white transition-colors">
+            <button onClick={() => setActiveView('community')} className="hover:text-white transition-colors cursor-pointer">
               Community
+            </button>
+            <button onClick={() => setActiveView('collections')} className="hover:text-white transition-colors cursor-pointer">
+              Collections
             </button>
           </div>
         </div>
       </footer>
 
-      {/* Floating Pill Navbar & ColorOS 17 Shortcuts Dock */}
-      <FloatingPillDock onOpenSyncModal={() => setIsSyncModalOpen(true)} />
+      {/* Android Edge-to-Edge Bottom Navigation Bar */}
+      <AndroidBottomNav onOpenSyncModal={() => setIsSyncModalOpen(true)} />
 
       {/* Global Modals & Drawers */}
       <AnimeDetailModal />
@@ -111,6 +118,7 @@ const MainLayout: React.FC = () => {
       <AuthModal />
       <AdminModal />
       <NotificationDrawer />
+      <CommandPaletteModal />
       <StreamingSyncModal
         isOpen={isSyncModalOpen}
         onClose={() => setIsSyncModalOpen(false)}

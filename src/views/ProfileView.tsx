@@ -1,7 +1,8 @@
 /**
  * ProfileView - Public & Personal Anime Identity Profile
  * Comprehensive gamification system: real-time XP calculation, dynamic badges,
- * milestone trackers (episodes, chapters, reviews), and public profile display
+ * milestone trackers (episodes, chapters, reviews), and public profile display.
+ * Includes full profile editing (Name, Username, Bio, Avatar) and Firebase Auth password management.
  */
 
 import React, { useState } from 'react';
@@ -32,11 +33,25 @@ import {
   CheckCircle,
   Compass,
   Lock,
-  ArrowRight
+  ArrowRight,
+  Settings,
+  Edit3,
+  KeyRound,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  CheckCircle2,
+  Tv,
+  Layers,
+  X
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { AnimeCard } from '../components/AnimeCard';
-import { UserProfile, BadgeCategory, UserBadge } from '../types';
+import { StreakCounterCard } from '../components/StreakCounterCard';
+import { GamificationBanner } from '../components/GamificationBanner';
+import { PersonalityCard } from '../components/PersonalityCard';
+import { ProfileSkeleton } from '../components/SkeletonLoader';
+import { UserProfile, BadgeCategory, UserBadge, MediaItem } from '../types';
 import { getTierColors, LEVEL_MILESTONES } from '../utils/gamification';
 
 export const ProfileView: React.FC = () => {
@@ -53,35 +68,73 @@ export const ProfileView: React.FC = () => {
     triggerCelebration,
     setSelectedMedia,
     setIsIdentityCardOpen,
-    showToast
+    streak,
+    showToast,
+    updateUserProfileDataAction,
+    updateUserPasswordAction,
+    resetPasswordAction,
+    firebaseUser
   } = useApp();
 
+  const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'anime' | 'manga' | 'favorites' | 'reviews' | 'stats' | 'achievements'>('overview');
   const [selectedBadgeCategory, setSelectedBadgeCategory] = useState<BadgeCategory | 'all'>('all');
+
+  // Edit Profile & Security Modal States
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editTab, setEditTab] = useState<'profile' | 'security'>('profile');
+  const [editDisplayName, setEditDisplayName] = useState(currentUser.displayName);
+  const [editUsername, setEditUsername] = useState(currentUser.username);
+  const [editBio, setEditBio] = useState(currentUser.bio);
+  const [editAvatar, setEditAvatar] = useState(currentUser.avatar);
+
+  // Password change states
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [securityStatus, setSecurityStatus] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 240);
+    return () => clearTimeout(timer);
+  }, []);
 
   const profile = activeProfileViewUser;
   const isSelf = profile.id === currentUser.id;
   const isFollowing = following.includes(profile.id);
+
+  // Sync edit form with current user on open
+  const openEditModal = () => {
+    setEditDisplayName(currentUser.displayName);
+    setEditUsername(currentUser.username);
+    setEditBio(currentUser.bio);
+    setEditAvatar(currentUser.avatar);
+    setNewPassword('');
+    setConfirmPassword('');
+    setSecurityStatus(null);
+    setIsEditModalOpen(true);
+  };
 
   // User library items
   const userAnimeEntries = library.filter(e => e.userId === profile.id && e.mediaType === 'anime');
   const userMangaEntries = library.filter(e => e.userId === profile.id && (e.mediaType === 'manga' || e.mediaType === 'manhwa'));
 
   // Currently watching
-  const currentlyWatching = userAnimeEntries
+  const currentlyWatching: MediaItem[] = userAnimeEntries
     .filter(e => e.status === 'watching')
     .map(e => mediaItems.find(m => m.id === e.mediaId))
-    .filter(Boolean);
+    .filter((m): m is MediaItem => Boolean(m));
 
   // Favorites
-  const favoriteMedia = profile.favoriteMediaIds
+  const favoriteMedia: MediaItem[] = profile.favoriteMediaIds
     .map(id => mediaItems.find(m => m.id === id))
-    .filter(Boolean);
+    .filter((m): m is MediaItem => Boolean(m));
 
   // User reviews
   const userReviews = reviews.filter(r => r.userId === profile.id);
 
-  // Gamification metrics: if looking at self, use live computed gamification state
+  // Gamification metrics
   const activeLevel = isSelf ? gamification.level : profile.level;
   const activeTitle = isSelf ? gamification.title : 'Otaku Explorer';
   const activeXp = isSelf ? gamification.totalXp : profile.xp;
@@ -92,6 +145,102 @@ export const ProfileView: React.FC = () => {
   const handleShareProfile = () => {
     navigator.clipboard?.writeText(`https://kurolist.app/user/${profile.username}`);
     showToast(`Copied @${profile.username}'s profile link!`);
+  };
+
+  // Save Profile Details
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editDisplayName.trim()) {
+      showToast('Display name cannot be empty', 'error');
+      return;
+    }
+    if (!editUsername.trim()) {
+      showToast('Username cannot be empty', 'error');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await updateUserProfileDataAction({
+        displayName: editDisplayName.trim(),
+        username: editUsername.trim().replace(/^@/, ''),
+        bio: editBio.trim(),
+        avatar: editAvatar.trim()
+      });
+      setIsEditModalOpen(false);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update profile details', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle Password Change
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSecurityStatus(null);
+
+    if (newPassword.length < 6) {
+      setSecurityStatus({
+        type: 'error',
+        message: 'New password must be at least 6 characters long.'
+      });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setSecurityStatus({
+        type: 'error',
+        message: 'New passwords do not match. Please verify.'
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await updateUserPasswordAction(newPassword);
+      setSecurityStatus({
+        type: 'success',
+        message: 'Password changed successfully! You can now use your new password.'
+      });
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      setSecurityStatus({
+        type: 'error',
+        message: err.message || 'Password update failed. Please re-authenticate and try again.'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Send Password Reset Email fallback
+  const handleSendResetEmail = async () => {
+    const email = firebaseUser?.email || currentUser.email;
+    if (!email) {
+      setSecurityStatus({
+        type: 'error',
+        message: 'No email address associated with this account.'
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await resetPasswordAction(email);
+      setSecurityStatus({
+        type: 'success',
+        message: `Password reset link sent to ${email}! Check your inbox.`
+      });
+    } catch (err: any) {
+      setSecurityStatus({
+        type: 'error',
+        message: err.message || 'Failed to send password reset email.'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const getBadgeIcon = (iconName: string) => {
@@ -116,10 +265,21 @@ export const ProfileView: React.FC = () => {
 
   const filteredBadges = activeBadges.filter(b => selectedBadgeCategory === 'all' || b.category === selectedBadgeCategory);
 
+  const avatarPresets = [
+    '/src/assets/images/user_avatar_ashok_1793517808935.jpg',
+    '/src/assets/images/anime_card_nebula_1793517807647.jpg',
+    '/src/assets/images/hero_cinematic_anime_1793517807898.jpg',
+    '/src/assets/images/frieren_fantasy_banner_1793517808620.jpg'
+  ];
+
+  if (isLoading) {
+    return <ProfileSkeleton />;
+  }
+
   return (
-    <div className="space-y-8 pb-16">
+    <div className="space-y-8 pb-16 animate-in fade-in duration-200">
       {/* 1. Header Banner & Identity Card */}
-      <div className="relative bg-[#181A26] border border-[#2A2F45] rounded-3xl overflow-hidden shadow-2xl">
+      <div className="relative bg-[#161824] border border-[#262A3E] rounded-3xl overflow-hidden shadow-2xl">
         {/* Cover Image */}
         <div className="relative h-48 sm:h-64 w-full overflow-hidden bg-slate-900">
           <img
@@ -127,7 +287,7 @@ export const ProfileView: React.FC = () => {
             alt="Banner"
             className="w-full h-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#181A26] via-[#181A26]/40 to-black/30" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#161824] via-[#161824]/40 to-black/30" />
         </div>
 
         {/* Profile Content */}
@@ -135,15 +295,25 @@ export const ProfileView: React.FC = () => {
           <div className="flex flex-col sm:flex-row items-center sm:items-end justify-between gap-6">
             {/* Avatar & Display Info */}
             <div className="flex flex-col sm:flex-row items-center sm:items-end gap-5 text-center sm:text-left">
-              <div className="relative">
+              <div className="relative group">
                 <img
                   src={profile.avatar}
                   alt={profile.displayName}
-                  className="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl object-cover ring-4 ring-[#181A26] shadow-2xl bg-slate-800"
+                  className="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl object-cover ring-4 ring-[#161824] shadow-2xl bg-slate-800"
                 />
-                <span className="absolute bottom-1 right-1 bg-gradient-to-r from-indigo-600 to-violet-600 text-[10px] font-bold text-white px-2 py-0.5 rounded-md ring-2 ring-[#181A26] shadow-md">
+                <span className="absolute bottom-1 right-1 bg-gradient-to-r from-indigo-600 to-violet-600 text-[10px] font-bold text-white px-2 py-0.5 rounded-md ring-2 ring-[#161824] shadow-md font-mono">
                   Lv.{activeLevel}
                 </span>
+                {isSelf && (
+                  <button
+                    onClick={openEditModal}
+                    className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 rounded-2xl flex items-center justify-center text-white transition-opacity text-xs font-semibold gap-1"
+                    title="Change Avatar"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    <span>Edit</span>
+                  </button>
+                )}
               </div>
 
               <div>
@@ -158,9 +328,10 @@ export const ProfileView: React.FC = () => {
                   )}
                 </div>
 
+                {/* Unboxed Metadata with Typographic Separators */}
                 <div className="flex items-center justify-center sm:justify-start gap-2 text-xs text-indigo-400 font-mono mt-0.5">
                   <span>@{profile.username}</span>
-                  <span className="text-slate-600">·</span>
+                  <span aria-hidden="true" className="text-slate-600">·</span>
                   <span className="text-slate-300 font-sans font-medium">{activeTitle}</span>
                 </div>
 
@@ -175,16 +346,37 @@ export const ProfileView: React.FC = () => {
                     <Calendar className="w-3.5 h-3.5 text-slate-500" />
                     Joined {profile.joinDate}
                   </span>
+                  <span className="text-slate-500">·</span>
+                  <span className="text-slate-300 font-mono">{userAnimeEntries.length} Anime</span>
+                  <span className="text-slate-500">·</span>
+                  <span className="text-slate-300 font-mono">{userMangaEntries.length} Manga</span>
                 </div>
               </div>
             </div>
 
-            {/* CTAs */}
-            <div className="flex items-center gap-2.5">
-              {!isSelf && (
+            {/* Profile Action Buttons */}
+            <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2.5">
+              {isSelf ? (
+                <>
+                  <button
+                    onClick={openEditModal}
+                    className="min-h-[40px] px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition-all shadow-md shadow-indigo-600/30 active:scale-95"
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span>Edit Profile & Security</span>
+                  </button>
+                  <button
+                    onClick={() => setIsIdentityCardOpen(true)}
+                    className="min-h-[40px] px-4 py-2 bg-[#12141F] hover:bg-[#1C2033] border border-[#262A3E] text-indigo-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
+                  >
+                    <Sparkles className="w-4 h-4 text-indigo-400" />
+                    <span>Identity Card</span>
+                  </button>
+                </>
+              ) : (
                 <button
                   onClick={() => toggleFollow(profile.id)}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md ${
+                  className={`min-h-[40px] px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md ${
                     isFollowing
                       ? 'bg-[#1F2335] text-slate-200 border border-[#2A2F45]'
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
@@ -196,17 +388,9 @@ export const ProfileView: React.FC = () => {
               )}
 
               <button
-                onClick={() => setIsIdentityCardOpen(true)}
-                className="px-4 py-2 bg-gradient-to-r from-indigo-500/15 to-violet-500/15 border border-indigo-500/30 hover:border-indigo-400 text-indigo-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
-              >
-                <Sparkles className="w-4 h-4 text-indigo-400" />
-                Anime Identity Card
-              </button>
-
-              <button
                 onClick={handleShareProfile}
-                className="p-2 bg-[#131520] hover:bg-[#1F2335] border border-[#2A2F45] text-slate-300 hover:text-white rounded-xl transition-colors"
-                title="Share Profile"
+                className="min-w-[40px] min-h-[40px] flex items-center justify-center bg-[#12141F] hover:bg-[#1F2335] border border-[#262A3E] text-slate-300 hover:text-white rounded-xl transition-colors"
+                title="Share Profile Link"
               >
                 <Share2 className="w-4 h-4" />
               </button>
@@ -215,493 +399,627 @@ export const ProfileView: React.FC = () => {
 
           {/* Biography */}
           <div className="mt-5 max-w-3xl text-xs sm:text-sm text-slate-300 leading-relaxed text-center sm:text-left">
-            {profile.bio}
+            {profile.bio || 'Anime enthusiast, manga reader, and seasonal watcher.'}
           </div>
 
           {/* Gamification Level & XP Progress Banner */}
-          <div className="mt-6 p-4 bg-[#131520] border border-[#2A2F45] rounded-2xl">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-2">
-              <div className="flex items-center gap-2">
-                <Trophy className="w-4 h-4 text-amber-400" />
-                <span className="text-xs font-bold text-white">Level {activeLevel} · {activeTitle}</span>
-                <span className="text-[11px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
-                  {activeXp.toLocaleString()} Total XP
-                </span>
-              </div>
-              <div className="text-xs text-slate-400 font-mono">
-                {activeXp.toLocaleString()} / {activeNextXp.toLocaleString()} XP ({activeProgressPct}%)
-              </div>
-            </div>
-
-            {/* XP Progress Bar */}
-            <div className="w-full bg-[#181A26] h-2.5 rounded-full overflow-hidden border border-white/5">
-              <div
-                className="h-full bg-gradient-to-r from-indigo-500 via-violet-500 to-amber-400 rounded-full transition-all duration-500"
-                style={{ width: `${activeProgressPct}%` }}
-              />
-            </div>
-
-            {/* Dynamic Milestone Counters */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-3 border-t border-[#2A2F45]/60 text-center">
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
-                  <Play className="w-3 h-3 text-indigo-400" />
-                  Episodes Watched
-                </div>
-                <div className="text-sm font-bold font-mono text-white mt-0.5">
-                  {isSelf ? gamification.episodesWatched : stats.episodesWatched}
-                  <span className="text-[10px] text-slate-500 font-normal ml-1">
-                    (+{((isSelf ? gamification.episodesWatched : stats.episodesWatched) * 15).toLocaleString()} XP)
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
-                  <BookOpen className="w-3 h-3 text-indigo-400" />
-                  Chapters Read
-                </div>
-                <div className="text-sm font-bold font-mono text-white mt-0.5">
-                  {isSelf ? gamification.chaptersRead : stats.chaptersRead}
-                  <span className="text-[10px] text-slate-500 font-normal ml-1">
-                    (+{((isSelf ? gamification.chaptersRead : stats.chaptersRead) * 10).toLocaleString()} XP)
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
-                  <Feather className="w-3 h-3 text-indigo-400" />
-                  Reviews Written
-                </div>
-                <div className="text-sm font-bold font-mono text-white mt-0.5">
-                  {isSelf ? gamification.reviewsWritten : userReviews.length}
-                  <span className="text-[10px] text-slate-500 font-normal ml-1">
-                    (+{((isSelf ? gamification.reviewsWritten : userReviews.length) * 200).toLocaleString()} XP)
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
-                  <Award className="w-3 h-3 text-amber-400" />
-                  Badges Unlocked
-                </div>
-                <div className="text-sm font-bold font-mono text-amber-300 mt-0.5">
-                  {isSelf ? `${gamification.unlockedBadgesCount} / ${gamification.totalBadgesCount}` : '4 Unlocked'}
-                </div>
-              </div>
-            </div>
+          <div className="mt-5">
+            <GamificationBanner
+              level={activeLevel}
+              title={activeTitle}
+              totalXp={activeXp}
+              nextLevelXp={activeNextXp}
+              progressPercent={activeProgressPct}
+              episodesWatched={gamification.episodesWatched}
+              chaptersRead={gamification.chaptersRead}
+              reviewsWritten={gamification.reviewsWritten}
+              unlockedBadgesCount={gamification.unlockedBadgesCount}
+              totalBadgesCount={gamification.totalBadgesCount}
+            />
           </div>
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="flex items-center gap-1 px-6 border-t border-[#262A3E] bg-[#12141F] overflow-x-auto scrollbar-none text-xs font-semibold">
+          {[
+            { id: 'overview', label: 'Overview' },
+            { id: 'anime', label: `Anime (${userAnimeEntries.length})` },
+            { id: 'manga', label: `Manga (${userMangaEntries.length})` },
+            { id: 'favorites', label: `Favorites (${favoriteMedia.length})` },
+            { id: 'reviews', label: `Reviews (${userReviews.length})` },
+            { id: 'achievements', label: `Badges (${activeBadges.length})` },
+            { id: 'stats', label: 'Analytics' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`py-3.5 px-4 border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                activeTab === tab.id
+                  ? 'border-indigo-500 text-indigo-400 font-bold'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>{tab.label}</span>
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* 2. Navigation Tabs */}
-      <div className="flex items-center gap-4 border-b border-[#2A2F45] overflow-x-auto no-scrollbar text-xs font-medium">
-        {[
-          { id: 'overview', label: 'Overview' },
-          { id: 'anime', label: `Anime (${userAnimeEntries.length})` },
-          { id: 'manga', label: `Manga (${userMangaEntries.length})` },
-          { id: 'favorites', label: `Favorites (${favoriteMedia.length})` },
-          { id: 'reviews', label: `Reviews (${userReviews.length})` },
-          { id: 'stats', label: 'Analytics & Visuals' },
-          { id: 'achievements', label: `Badges & XP (${isSelf ? gamification.unlockedBadgesCount : 4})` }
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`pb-3 transition-colors relative whitespace-nowrap shrink-0 ${
-              activeTab === tab.id ? 'text-indigo-400 font-semibold' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            {tab.label}
-            {activeTab === tab.id && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full" />}
-          </button>
-        ))}
-      </div>
-
-      {/* 3. Tab Contents */}
-
-      {/* Tab: Overview */}
+      {/* 2. OVERVIEW TAB */}
       {activeTab === 'overview' && (
         <div className="space-y-8">
-          {/* Earned Badges Showcase */}
-          <div className="bg-[#181A26] border border-[#2A2F45] rounded-2xl p-5 shadow-xl">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Award className="w-4 h-4 text-amber-400" />
-                <h3 className="text-sm font-bold text-white">Earned Badges Showcase</h3>
-              </div>
-              <button
-                onClick={() => setActiveTab('achievements')}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1"
-              >
-                View all ({isSelf ? gamification.totalBadgesCount : 12}) <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+          {/* Prominent Card Split: Streak Counter Card + Quick Stats Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            {/* Prominent Streak Counter Card in Profile Overview (§User Requirement) */}
+            <div className="lg:col-span-5 flex flex-col">
+              <StreakCounterCard
+                streak={streak}
+                className="h-full flex-1"
+              />
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {(isSelf ? gamification.badges.filter(b => b.unlocked) : []).slice(0, 4).map(badge => {
-                const colors = getTierColors(badge.tier);
+            {/* Quick Stats Bento */}
+            <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+              <div className="bg-[#161824] border border-[#262A3E] rounded-2xl p-4 flex flex-col justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Anime Completed</span>
+                <div className="mt-2 text-2xl font-bold font-mono text-white">
+                  {userAnimeEntries.filter(e => e.status === 'completed').length}
+                </div>
+                <span className="text-[10px] text-slate-500 mt-1 font-mono">
+                  of {userAnimeEntries.length} tracked
+                </span>
+              </div>
 
-                return (
-                  <div
-                    key={badge.id}
-                    className={`p-3 rounded-xl border ${colors.bg} ${colors.border} flex items-center gap-3 transition-transform hover:scale-102`}
-                  >
-                    <div className={`p-2 rounded-lg bg-[#131520] ${colors.text} shrink-0`}>
-                      {getBadgeIcon(badge.icon)}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate">{badge.name}</div>
-                      <div className="text-[10px] text-slate-400 capitalize">{badge.tier} · +{badge.xpReward} XP</div>
-                    </div>
-                  </div>
-                );
-              })}
+              <div className="bg-[#161824] border border-[#262A3E] rounded-2xl p-4 flex flex-col justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Episodes Logged</span>
+                <div className="mt-2 text-2xl font-bold font-mono text-indigo-400">
+                  {stats.episodesWatched}
+                </div>
+                <span className="text-[10px] text-slate-500 mt-1 font-mono">
+                  ~{stats.daysWatched} days watched
+                </span>
+              </div>
+
+              <div className="bg-[#161824] border border-[#262A3E] rounded-2xl p-4 flex flex-col justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Manga Chapters</span>
+                <div className="mt-2 text-2xl font-bold font-mono text-emerald-400">
+                  {stats.chaptersRead}
+                </div>
+                <span className="text-[10px] text-slate-500 mt-1 font-mono">
+                  {userMangaEntries.length} series
+                </span>
+              </div>
+
+              <div className="bg-[#161824] border border-[#262A3E] rounded-2xl p-4 flex flex-col justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Mean Rating</span>
+                <div className="mt-2 text-2xl font-bold font-mono text-amber-300 flex items-center gap-1">
+                  <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
+                  <span>{stats.averageScore}</span>
+                </div>
+                <span className="text-[10px] text-slate-500 mt-1 font-mono">out of 10.0</span>
+              </div>
+
+              <div className="bg-[#161824] border border-[#262A3E] rounded-2xl p-4 flex flex-col justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Reviews Published</span>
+                <div className="mt-2 text-2xl font-bold font-mono text-violet-400">
+                  {userReviews.length}
+                </div>
+                <span className="text-[10px] text-slate-500 mt-1 font-mono">Community critic</span>
+              </div>
+
+              <div className="bg-[#161824] border border-[#262A3E] rounded-2xl p-4 flex flex-col justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Badges Earned</span>
+                <div className="mt-2 text-2xl font-bold font-mono text-rose-400 flex items-center gap-1">
+                  <Trophy className="w-5 h-5 text-rose-400" />
+                  <span>{activeBadges.length}</span>
+                </div>
+                <span className="text-[10px] text-slate-500 mt-1 font-mono">
+                  Otaku Milestones
+                </span>
+              </div>
             </div>
           </div>
 
           {/* Personality Archetype Card */}
-          <div className="bg-gradient-to-r from-indigo-950/40 via-[#181A26] to-[#181A26] border border-indigo-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div>
-                <div className="inline-flex items-center gap-1.5 text-xs text-indigo-400 font-semibold uppercase tracking-wider mb-1">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Anime Personality Archetype
-                </div>
-                <h3 className="text-lg font-bold text-white tracking-tight">{profile.personality.title}</h3>
-                <p className="text-xs text-slate-300 mt-1 max-w-xl">{profile.personality.tagline}</p>
-              </div>
+          <PersonalityCard personality={profile.personality} />
 
-              <div className="px-4 py-2 bg-[#131520] border border-[#2A2F45] rounded-xl text-center shrink-0">
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider">Watching Pace</div>
-                <div className="text-xs font-bold text-indigo-300 mt-0.5">{profile.personality.watchingPace}</div>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-400 mt-4 leading-relaxed border-t border-[#2A2F45]/60 pt-3">
-              {profile.personality.vibeDescription}
-            </p>
-          </div>
-
-          {/* Currently Watching Row */}
+          {/* Currently Watching Section */}
           {currentlyWatching.length > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-bold text-white">Currently Watching</h3>
-                <span className="text-xs text-slate-400 font-mono">{currentlyWatching.length} active</span>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                  <Play className="w-4 h-4 text-indigo-400 fill-indigo-400" />
+                  Currently Watching ({currentlyWatching.length})
+                </h3>
+                <button
+                  onClick={() => setActiveTab('anime')}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
+                >
+                  View All Anime →
+                </button>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {currentlyWatching.map(media => (
-                  <AnimeCard key={media?.id} media={media!} />
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {currentlyWatching.slice(0, 6).map(media => (
+                  <AnimeCard key={media.id} media={media} showProgress={true} />
                 ))}
               </div>
             </div>
           )}
 
-          {/* Hall of Fame Favorites */}
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Heart className="w-4 h-4 text-rose-500 fill-rose-500" />
-                Favorite Series
-              </h3>
+          {/* Favorites Showcase */}
+          {favoriteMedia.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                  <Heart className="w-4 h-4 text-rose-400 fill-rose-400" />
+                  All-Time Favorites ({favoriteMedia.length})
+                </h3>
+                <button
+                  onClick={() => setActiveTab('favorites')}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
+                >
+                  View Showcase →
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {favoriteMedia.slice(0, 6).map(media => (
+                  <AnimeCard key={media.id} media={media} showProgress={false} />
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {favoriteMedia.map(media => (
-                <AnimeCard key={media?.id} media={media!} />
-              ))}
-            </div>
-          </div>
+          )}
         </div>
       )}
 
-      {/* Tab: Anime List */}
+      {/* 3. ANIME LIST TAB */}
       {activeTab === 'anime' && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {userAnimeEntries.map(entry => {
-            const media = mediaItems.find(m => m.id === entry.mediaId);
-            if (!media) return null;
-            return <AnimeCard key={media.id} media={media} />;
-          })}
-        </div>
-      )}
-
-      {/* Tab: Manga List */}
-      {activeTab === 'manga' && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {userMangaEntries.map(entry => {
-            const media = mediaItems.find(m => m.id === entry.mediaId);
-            if (!media) return null;
-            return <AnimeCard key={media.id} media={media} />;
-          })}
-        </div>
-      )}
-
-      {/* Tab: Favorites */}
-      {activeTab === 'favorites' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {favoriteMedia.map(media => (
-              <AnimeCard key={media?.id} media={media!} />
-            ))}
-          </div>
-
-          {/* Favorite Studios & Characters */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8">
-            <div className="bg-[#181A26] border border-[#2A2F45] rounded-2xl p-5">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
-                Favorite Studios
-              </h4>
-              <div className="flex flex-wrap gap-2">
-                {profile.favoriteStudios.map(studio => (
-                  <span key={studio} className="px-3 py-1 bg-[#131520] border border-[#2A2F45] text-xs font-medium text-white rounded-lg">
-                    {studio}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-[#181A26] border border-[#2A2F45] rounded-2xl p-5">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
-                Favorite Characters
-              </h4>
-              <div className="flex flex-wrap gap-2">
-                {profile.favoriteCharacterNames.map(char => (
-                  <span key={char} className="px-3 py-1 bg-[#131520] border border-[#2A2F45] text-xs font-medium text-indigo-300 rounded-lg">
-                    {char}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tab: Reviews */}
-      {activeTab === 'reviews' && (
         <div className="space-y-4">
-          {userReviews.length === 0 ? (
-            <div className="p-12 text-center text-xs text-slate-400 bg-[#181A26] rounded-2xl border border-[#2A2F45]">
-              No written reviews published yet.
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-white">Anime Watchlist ({userAnimeEntries.length})</h3>
+            <span className="text-xs text-slate-400 font-mono">
+              {userAnimeEntries.filter(e => e.status === 'completed').length} completed
+            </span>
+          </div>
+
+          {userAnimeEntries.length === 0 ? (
+            <div className="p-12 text-center bg-[#161824] border border-[#262A3E] rounded-2xl text-slate-400 text-xs">
+              No anime titles tracked yet. Add titles from Discover or My Library.
             </div>
           ) : (
-            userReviews.map(review => (
-              <div key={review.id} className="bg-[#181A26] border border-[#2A2F45] rounded-2xl p-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <img src={review.mediaCover} alt={review.mediaTitle} className="w-9 h-12 object-cover rounded-lg" />
-                    <div>
-                      <h4 className="text-sm font-bold text-white">{review.mediaTitle}</h4>
-                      <div className="text-xs text-indigo-400 font-mono font-semibold">★ {review.rating}/10</div>
-                    </div>
-                  </div>
-                  <span className="text-xs text-slate-400 font-mono">{review.createdAt}</span>
-                </div>
-
-                <h5 className="text-xs font-bold text-white">{review.title}</h5>
-                <p className="text-xs text-slate-300 leading-relaxed">{review.content}</p>
-
-                <div className="flex items-center gap-1.5 text-xs text-slate-400 pt-2 border-t border-[#2A2F45]/50">
-                  <ThumbsUp className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>{review.helpfulCount} community members found this helpful</span>
-                </div>
-              </div>
-            ))
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {userAnimeEntries.map(entry => {
+                const media = mediaItems.find(m => m.id === entry.mediaId);
+                if (!media) return null;
+                return <AnimeCard key={entry.id} media={media} showProgress={true} />;
+              })}
+            </div>
           )}
         </div>
       )}
 
-      {/* Tab: Visual Analytics & Statistics */}
-      {activeTab === 'stats' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Genre Distribution Bars */}
-            <div className="bg-[#181A26] border border-[#2A2F45] rounded-2xl p-6 shadow-xl">
-              <h3 className="text-sm font-bold text-white mb-1">Genre Distribution</h3>
-              <p className="text-xs text-slate-400 mb-5">Breakdown of content logged across all genres</p>
-
-              <div className="space-y-3">
-                {Object.entries(stats.genreCounts).map(([genre, count]) => {
-                  const maxCount = Math.max(...Object.values(stats.genreCounts), 1);
-                  const pct = Math.round((count / maxCount) * 100);
-
-                  return (
-                    <div key={genre}>
-                      <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
-                        <span className="font-medium">{genre}</span>
-                        <span className="font-mono text-slate-400">{count} titles</span>
-                      </div>
-                      <div className="w-full bg-[#131520] h-2 rounded-full overflow-hidden">
-                        <div
-                          className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full rounded-full"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Score Distribution (1 to 10) */}
-            <div className="bg-[#181A26] border border-[#2A2F45] rounded-2xl p-6 shadow-xl">
-              <h3 className="text-sm font-bold text-white mb-1">Score Distribution</h3>
-              <p className="text-xs text-slate-400 mb-5">Ratings given across your entire library</p>
-
-              <div className="flex items-end justify-between h-48 pt-6 px-2 gap-1.5">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(s => {
-                  const count = stats.scoreDistribution[s] || 0;
-                  const maxS = Math.max(...Object.values(stats.scoreDistribution), 1);
-                  const heightPct = Math.max(8, Math.round((count / maxS) * 100));
-
-                  return (
-                    <div key={s} className="flex-1 flex flex-col items-center gap-1.5">
-                      <span className="text-[10px] font-mono text-slate-400">{count > 0 ? count : ''}</span>
-                      <div className="w-full bg-[#131520] rounded-t flex-1 flex items-end">
-                        <div
-                          className={`w-full rounded-t transition-all ${
-                            s === 10 ? 'bg-amber-400' : s >= 8 ? 'bg-indigo-500' : 'bg-slate-600'
-                          }`}
-                          style={{ height: `${heightPct}%` }}
-                        />
-                      </div>
-                      <span className="text-[11px] font-mono font-bold text-slate-300">{s}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+      {/* 4. MANGA LIST TAB */}
+      {activeTab === 'manga' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-white">Manga & Light Novels ({userMangaEntries.length})</h3>
+            <span className="text-xs text-slate-400 font-mono">
+              {userMangaEntries.filter(e => e.status === 'completed').length} completed
+            </span>
           </div>
+
+          {userMangaEntries.length === 0 ? (
+            <div className="p-12 text-center bg-[#161824] border border-[#262A3E] rounded-2xl text-slate-400 text-xs">
+              No manga titles tracked yet.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {userMangaEntries.map(entry => {
+                const media = mediaItems.find(m => m.id === entry.mediaId);
+                if (!media) return null;
+                return <AnimeCard key={entry.id} media={media} showProgress={true} />;
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Tab: Badges & Gamification Center */}
+      {/* 5. FAVORITES TAB */}
+      {activeTab === 'favorites' && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-bold text-white">Curated Favorites ({favoriteMedia.length})</h3>
+          {favoriteMedia.length === 0 ? (
+            <div className="p-12 text-center bg-[#161824] border border-[#262A3E] rounded-2xl text-slate-400 text-xs">
+              No favorites saved yet. Click the heart icon on any anime card to add it here.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {favoriteMedia.map(media => (
+                <AnimeCard key={media.id} media={media} showProgress={false} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 6. REVIEWS TAB */}
+      {activeTab === 'reviews' && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-bold text-white">User Reviews ({userReviews.length})</h3>
+          {userReviews.length === 0 ? (
+            <div className="p-12 text-center bg-[#161824] border border-[#262A3E] rounded-2xl text-slate-400 text-xs">
+              No reviews written yet. Review an anime from its detail card to share your thoughts.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {userReviews.map(r => {
+                const media = mediaItems.find(m => m.id === r.mediaId);
+                return (
+                  <div key={r.id} className="p-5 bg-[#161824] border border-[#262A3E] rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {media && (
+                          <img
+                            src={media.coverImage}
+                            alt={media.title}
+                            className="w-10 h-14 object-cover rounded-lg bg-slate-800"
+                          />
+                        )}
+                        <div>
+                          <div className="font-bold text-white text-sm">{r.title}</div>
+                          <div className="text-xs text-indigo-400">{media?.title}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 font-mono font-bold text-amber-300">
+                        <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                        <span>{r.rating}/10</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">{r.content}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 7. BADGES & ACHIEVEMENTS TAB */}
       {activeTab === 'achievements' && (
         <div className="space-y-6">
-          {/* Milestone Overview Card */}
-          <div className="bg-[#181A26] border border-[#2A2F45] rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-xl">
-            <div className="space-y-1">
-              <div className="text-xs text-indigo-400 font-semibold uppercase tracking-wider flex items-center gap-1.5">
-                <Trophy className="w-4 h-4 text-amber-400" />
-                Prestige Rank Progression
-              </div>
-              <h3 className="text-xl font-bold text-white">Level {activeLevel} · {activeTitle}</h3>
-              <p className="text-xs text-slate-400 max-w-md leading-relaxed">
-                Watch episodes (+15 XP), read chapters (+10 XP), write reviews (+200 XP), and complete series (+150 XP) to earn prestige ranks.
-              </p>
-            </div>
-
-            <div className="w-full md:w-64 bg-[#131520] border border-[#2A2F45] rounded-xl p-4 text-center">
-              <div className="text-xs text-slate-400 font-mono">
-                {activeXp.toLocaleString()} / {activeNextXp.toLocaleString()} XP
-              </div>
-              <div className="w-full bg-[#181A26] h-2.5 rounded-full overflow-hidden mt-2">
-                <div
-                  className="bg-gradient-to-r from-indigo-500 to-amber-400 h-full rounded-full"
-                  style={{ width: `${activeProgressPct}%` }}
-                />
-              </div>
-              <div className="text-[11px] text-amber-300 font-medium mt-2">
-                Next Rank: Level {activeLevel + 1}
-              </div>
-            </div>
-          </div>
-
-          {/* Badge Category Segmented Controls */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar p-1.5 bg-[#181A26] border border-[#2A2F45] rounded-xl">
+          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-[#12141F] border border-[#262A3E] rounded-xl text-xs font-semibold">
             {(['all', 'episodes', 'manga', 'reviews', 'completion', 'special'] as const).map(cat => (
               <button
                 key={cat}
                 onClick={() => setSelectedBadgeCategory(cat)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg capitalize transition-all whitespace-nowrap shrink-0 ${
+                className={`px-3 py-1.5 rounded-lg capitalize transition-colors ${
                   selectedBadgeCategory === cat
-                    ? 'bg-indigo-600 text-white shadow-md'
+                    ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                {cat === 'all' ? 'All Badges' : cat}
+                {cat}
               </button>
             ))}
           </div>
 
-          {/* Badges Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredBadges.map(badge => {
-              const colors = getTierColors(badge.tier);
-              const cur = badge.currentProgress ?? 0;
-              const req = badge.requiredProgress || 1;
-              const progressPct = Math.round((cur / req) * 100);
+            {filteredBadges.map(b => (
+              <div
+                key={b.id}
+                className="p-4 bg-[#161824] border border-[#262A3E] rounded-2xl flex items-start gap-3.5 hover:border-indigo-500/50 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 flex items-center justify-center shrink-0">
+                  {getBadgeIcon(b.icon)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-white text-xs truncate">{b.name}</h4>
+                    <span className="text-[10px] text-amber-300 font-mono">+{b.xpReward} XP</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">{b.description}</p>
+                  <div className="mt-2 text-[10px] text-indigo-400 font-mono uppercase">
+                    Tier {b.tier} · {b.category}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-              return (
-                <div
-                  key={badge.id}
-                  onClick={() => {
-                    if (badge.unlocked) {
-                      triggerCelebration({
-                        type: 'badge_unlocked',
-                        title: badge.name,
-                        subtitle: badge.description,
-                        xpEarned: badge.xpReward || 50,
-                        badge
-                      });
-                    }
-                  }}
-                  className={`p-4 rounded-2xl border transition-all cursor-pointer relative overflow-hidden ${
-                    badge.unlocked
-                      ? `${colors.bg} ${colors.border} shadow-lg hover:scale-102`
-                      : 'bg-[#131520] border-[#2A2F45] opacity-60 hover:opacity-80'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className={`p-2.5 rounded-xl bg-[#0F1016] ${colors.text} shrink-0 ring-1 ring-white/10`}>
-                        {getBadgeIcon(badge.icon)}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <h4 className="text-xs font-bold text-white leading-tight">{badge.name}</h4>
-                          {badge.unlocked && (
-                            <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                          )}
-                        </div>
-                        <div className="text-[10px] text-slate-400 capitalize font-medium">
-                          {badge.tier} Tier · {badge.category}
-                        </div>
-                      </div>
-                    </div>
+      {/* 8. STATS & ANALYTICS TAB */}
+      {activeTab === 'stats' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-5 bg-[#161824] border border-[#262A3E] rounded-2xl text-center">
+              <div className="text-3xl font-extrabold text-white font-mono">{stats.daysWatched}</div>
+              <div className="text-xs text-slate-400 mt-1">Days Watched (Non-Stop)</div>
+            </div>
+            <div className="p-5 bg-[#161824] border border-[#262A3E] rounded-2xl text-center">
+              <div className="text-3xl font-extrabold text-indigo-400 font-mono">{stats.animeCount}</div>
+              <div className="text-xs text-slate-400 mt-1">Total Anime Tracked</div>
+            </div>
+            <div className="p-5 bg-[#161824] border border-[#262A3E] rounded-2xl text-center">
+              <div className="text-3xl font-extrabold text-emerald-400 font-mono">{stats.mangaCount}</div>
+              <div className="text-xs text-slate-400 mt-1">Total Manga Tracked</div>
+            </div>
+          </div>
+        </div>
+      )}
 
-                    <span className="text-[10px] font-mono font-bold text-indigo-400 shrink-0">
-                      +{badge.xpReward} XP
-                    </span>
+      {/* -------------------- EDIT PROFILE & SECURITY MODAL -------------------- */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-lg bg-[#161824] border border-[#262A3E] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-[#262A3E] bg-[#12141F]">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+                  <Settings className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white tracking-tight">Account & Profile Settings</h3>
+                  <p className="text-[11px] text-slate-400">Manage your profile identity, avatar, and password</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-[#1E2235] transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Subtabs: Profile Details vs Password & Security */}
+            <div className="grid grid-cols-2 p-2 bg-[#0F1016] border-b border-[#262A3E] gap-1.5 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditTab('profile');
+                  setSecurityStatus(null);
+                }}
+                className={`py-2 rounded-xl transition-all flex items-center justify-center gap-2 ${
+                  editTab === 'profile'
+                    ? 'bg-[#1E2235] text-white font-bold border border-indigo-500/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Profile Information</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditTab('security');
+                  setSecurityStatus(null);
+                }}
+                className={`py-2 rounded-xl transition-all flex items-center justify-center gap-2 ${
+                  editTab === 'security'
+                    ? 'bg-[#1E2235] text-white font-bold border border-indigo-500/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                <span>Change Password</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 flex-1">
+              {/* TAB 1: PROFILE DETAILS FORM */}
+              {editTab === 'profile' && (
+                <form onSubmit={handleSaveProfile} className="space-y-4">
+                  {/* Display Name */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Display Name <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={editDisplayName}
+                      onChange={e => setEditDisplayName(e.target.value)}
+                      placeholder="e.g. Kenji Tanaka"
+                      required
+                      className="w-full bg-[#10121C] border border-[#262A3E] rounded-xl px-3.5 py-2.5 text-xs text-white outline-none focus:border-indigo-500 transition-colors"
+                    />
                   </div>
 
-                  <p className="text-xs text-slate-300 leading-snug min-h-[32px]">{badge.description}</p>
-
-                  {/* Progress Tracker Bar */}
-                  <div className="mt-3 pt-3 border-t border-white/5 space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px] font-mono">
-                      <span className="text-slate-400">
-                        {badge.currentProgress} / {badge.requiredProgress} {badge.unit}
-                      </span>
-                      <span className={badge.unlocked ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                        {badge.unlocked ? 'Unlocked' : `${progressPct}%`}
-                      </span>
-                    </div>
-
-                    <div className="w-full bg-[#0F1016] h-1.5 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          badge.unlocked ? 'bg-emerald-400' : 'bg-indigo-500'
-                        }`}
-                        style={{ width: `${Math.min(100, progressPct)}%` }}
+                  {/* Username */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Username <span className="text-rose-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-mono">@</span>
+                      <input
+                        type="text"
+                        value={editUsername}
+                        onChange={e => setEditUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
+                        placeholder="username"
+                        required
+                        className="w-full bg-[#10121C] border border-[#262A3E] rounded-xl pl-8 pr-3.5 py-2.5 text-xs text-white outline-none focus:border-indigo-500 transition-colors font-mono"
                       />
                     </div>
                   </div>
-                </div>
-              );
-            })}
+
+                  {/* Bio */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Bio / About Me
+                    </label>
+                    <textarea
+                      value={editBio}
+                      onChange={e => setEditBio(e.target.value)}
+                      rows={3}
+                      maxLength={240}
+                      placeholder="Tell the community about your anime journey, favorite studios, or current watch goals..."
+                      className="w-full bg-[#10121C] border border-[#262A3E] rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 transition-colors resize-none"
+                    />
+                    <div className="text-right text-[10px] text-slate-500 font-mono">
+                      {editBio.length}/240
+                    </div>
+                  </div>
+
+                  {/* Avatar Picker */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Profile Avatar
+                    </label>
+
+                    {/* Preview + URL */}
+                    <div className="flex items-center gap-3 mb-3">
+                      <img
+                        src={editAvatar}
+                        alt="Preview"
+                        className="w-12 h-12 rounded-xl object-cover ring-2 ring-indigo-500/50 bg-slate-900 shrink-0"
+                      />
+                      <input
+                        type="url"
+                        value={editAvatar}
+                        onChange={e => setEditAvatar(e.target.value)}
+                        placeholder="Paste custom image URL..."
+                        className="flex-1 bg-[#10121C] border border-[#262A3E] rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 transition-colors"
+                      />
+                    </div>
+
+                    {/* Presets */}
+                    <div className="text-[11px] text-slate-400 mb-1.5">Or choose a preset:</div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {avatarPresets.map((preset, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setEditAvatar(preset)}
+                          className={`aspect-square rounded-xl overflow-hidden border-2 transition-all p-0.5 ${
+                            editAvatar === preset
+                              ? 'border-indigo-500 ring-2 ring-indigo-500/40 scale-105'
+                              : 'border-[#262A3E] hover:border-slate-500 opacity-70 hover:opacity-100'
+                          }`}
+                        >
+                          <img src={preset} alt="preset" className="w-full h-full object-cover rounded-lg" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/30 flex items-center justify-center gap-2"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>{isSubmitting ? 'Saving Changes...' : 'Save Profile Details'}</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* TAB 2: PASSWORD & SECURITY */}
+              {editTab === 'security' && (
+                <form onSubmit={handleChangePassword} className="space-y-4">
+                  {/* Status Banner */}
+                  {securityStatus && (
+                    <div
+                      className={`p-3.5 rounded-xl border flex items-start gap-2.5 text-xs animate-in fade-in duration-150 ${
+                        securityStatus.type === 'error'
+                          ? 'bg-rose-950/40 border-rose-500/40 text-rose-200'
+                          : 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                      }`}
+                    >
+                      {securityStatus.type === 'error' ? (
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      )}
+                      <div className="flex-1">
+                        <p className="font-semibold">
+                          {securityStatus.type === 'error' ? 'Security Notice' : 'Success'}
+                        </p>
+                        <p className="text-[11px] mt-0.5">{securityStatus.message}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="p-3 bg-[#10121C] border border-[#262A3E] rounded-xl text-xs text-slate-400 space-y-1">
+                    <p className="font-semibold text-slate-200">Account Security Status</p>
+                    <p className="text-[11px]">
+                      {firebaseUser
+                        ? `Authenticated as: ${firebaseUser.email || currentUser.username}`
+                        : 'Local Session Active. Password updates sync with your Firebase credentials.'}
+                    </p>
+                  </div>
+
+                  {/* New Password */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      New Password (Minimum 6 characters)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={newPassword}
+                        onChange={e => setNewPassword(e.target.value)}
+                        placeholder="Enter new strong password"
+                        minLength={6}
+                        required
+                        className="w-full bg-[#10121C] border border-[#262A3E] rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-white outline-none focus:border-indigo-500 transition-colors"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Confirm Password */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Confirm New Password
+                    </label>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={e => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter new password"
+                      minLength={6}
+                      required
+                      className="w-full bg-[#10121C] border border-[#262A3E] rounded-xl px-3.5 py-2.5 text-xs text-white outline-none focus:border-indigo-500 transition-colors"
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={isSubmitting || !newPassword}
+                      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/30 flex items-center justify-center gap-2"
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>{isSubmitting ? 'Updating Password...' : 'Update Password'}</span>
+                    </button>
+                  </div>
+
+                  {/* Reset Password Email fallback */}
+                  <div className="pt-2 border-t border-[#262A3E] text-center">
+                    <button
+                      type="button"
+                      onClick={handleSendResetEmail}
+                      disabled={isSubmitting}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
+                    >
+                      Forgot current password? Send recovery email
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         </div>
       )}

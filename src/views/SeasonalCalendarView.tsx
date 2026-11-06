@@ -3,10 +3,11 @@
  * Displays release dates, broadcast times, episode countdowns, and quick-track triggers
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Bell, Bookmark, Play, Check } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { MediaItem } from '../types';
+import { SeasonalSkeleton } from '../components/SkeletonLoader';
 
 export const SeasonalCalendarView: React.FC = () => {
   const {
@@ -17,9 +18,19 @@ export const SeasonalCalendarView: React.FC = () => {
     showToast
   } = useApp();
 
+  const [isLoading, setIsLoading] = useState(true);
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
   const [selectedDay, setSelectedDay] = useState<typeof daysOfWeek[number]>('Saturday');
   const [activeSeason, setActiveSeason] = useState('Fall 2026 / Winter 2025');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (isLoading) {
+    return <SeasonalSkeleton />;
+  }
 
   // Filter airing anime for selected day
   const airingAnime = mediaItems.filter(m => m.type === 'anime');

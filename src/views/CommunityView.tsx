@@ -1,26 +1,27 @@
 /**
  * CommunityView - Community Discussions, Interactive Polls & Creator Network
- * Discussions, thread replies, spoiler toggles, live community voting, and user discovery
+ * Refactored into modular components with high-fidelity skeleton loading:
+ * - DiscussionThreadReader: Thread reader, poll voting, and replies
+ * - ActivityStream: Live social activity feed with likes and comments
+ * - CommunitySkeleton: Fluid loading placeholder
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   MessageSquare,
-  Flame,
   Plus,
-  Heart,
-  Vote,
   Sparkles,
-  Eye,
-  EyeOff,
   UserPlus,
   Check,
-  Send,
-  Pin
+  Vote,
+  Activity
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { CommunityTopic } from '../types';
+import { DiscussionThreadReader } from '../components/DiscussionThreadReader';
+import { GlobalActivity } from '../components/GlobalActivity';
+import { CommunitySkeleton } from '../components/SkeletonLoader';
 
 export const CommunityView: React.FC = () => {
   const {
@@ -34,13 +35,18 @@ export const CommunityView: React.FC = () => {
     toggleFollow,
     setActiveProfileViewUser,
     setActiveView,
-    showToast
+    activities,
+    reviews,
+    likeActivity,
+    commentActivity,
+    setSelectedMedia,
+    getMediaById
   } = useApp();
 
+  const [isLoading, setIsLoading] = useState(true);
+  const [communityTab, setCommunityTab] = useState<'discussions' | 'activity'>('discussions');
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [selectedTopic, setSelectedTopic] = useState<CommunityTopic | null>(topics[0] || null);
-  const [replyText, setReplyText] = useState('');
-  const [replySpoiler, setReplySpoiler] = useState(false);
   const [isCreatingTopic, setIsCreatingTopic] = useState(false);
 
   // New topic form state
@@ -50,8 +56,12 @@ export const CommunityView: React.FC = () => {
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
 
-  const categories = ['All', 'Theories', 'Episode Reaction', 'General', 'Manga Discussion', 'Recommendations'];
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 240);
+    return () => clearTimeout(timer);
+  }, []);
 
+  const categories = ['All', 'Theories', 'Episode Reaction', 'General', 'Manga Discussion', 'Recommendations'];
   const filteredTopics = topics.filter(t => activeCategory === 'All' || t.category === activeCategory);
 
   const handleCreateTopicSubmit = (e: React.FormEvent) => {
@@ -76,14 +86,9 @@ export const CommunityView: React.FC = () => {
     setPollOptions(['', '']);
   };
 
-  const handleSendReply = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!replyText.trim() || !selectedTopic) return;
-
-    replyTopic(selectedTopic.id, replyText, replySpoiler);
-    setReplyText('');
-    setReplySpoiler(false);
-  };
+  if (isLoading) {
+    return <CommunitySkeleton />;
+  }
 
   return (
     <div className="space-y-8 pb-16">
@@ -100,11 +105,12 @@ export const CommunityView: React.FC = () => {
         </div>
 
         <button
+          type="button"
           onClick={() => setIsCreatingTopic(!isCreatingTopic)}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 transition-colors"
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 transition-colors cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          Start Discussion
+          <span>{isCreatingTopic ? 'Cancel Topic' : 'Start Discussion'}</span>
         </button>
       </div>
 
@@ -140,15 +146,16 @@ export const CommunityView: React.FC = () => {
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => toggleFollow(user.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 flex items-center gap-1 ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-all cursor-pointer ${
                     isUserFollowing
-                      ? 'bg-[#1F2335] text-slate-300 border border-[#2A2F45]'
-                      : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                      ? 'bg-[#181A26] text-slate-300 border border-[#2A2F45]'
+                      : 'bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30'
                   }`}
                 >
-                  {isUserFollowing ? <Check className="w-3 h-3" /> : <UserPlus className="w-3 h-3" />}
-                  {isUserFollowing ? 'Following' : 'Follow'}
+                  {isUserFollowing ? <Check className="w-3 h-3 text-emerald-400" /> : <UserPlus className="w-3 h-3" />}
+                  <span>{isUserFollowing ? 'Following' : 'Follow'}</span>
                 </button>
               </div>
             );
@@ -156,18 +163,18 @@ export const CommunityView: React.FC = () => {
         </div>
       </div>
 
-      {/* Create Topic Modal Form (Collapsible) */}
+      {/* New Topic Creation Form (Drawer / Modal Style) */}
       {isCreatingTopic && (
-        <form
-          onSubmit={handleCreateTopicSubmit}
-          className="bg-[#181A26] border border-indigo-500/40 rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in duration-200"
-        >
+        <form onSubmit={handleCreateTopicSubmit} className="bg-[#181A26] border border-indigo-500/40 rounded-2xl p-5 space-y-4 shadow-xl">
           <div className="flex items-center justify-between border-b border-[#2A2F45] pb-3">
-            <h3 className="text-sm font-bold text-white">Create New Discussion Topic</h3>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Plus className="w-4 h-4 text-indigo-400" />
+              Create New Forum Topic
+            </h3>
             <button
               type="button"
               onClick={() => setIsCreatingTopic(false)}
-              className="text-xs text-slate-400 hover:text-white"
+              className="text-xs text-slate-400 hover:text-white cursor-pointer"
             >
               Cancel
             </button>
@@ -175,13 +182,13 @@ export const CommunityView: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold text-slate-400 mb-1">Title</label>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">Topic Title</label>
               <input
                 type="text"
                 required
                 value={newTitle}
                 onChange={e => setNewTitle(e.target.value)}
-                placeholder="What would you like to discuss?"
+                placeholder="e.g. Frieren Episode 28 Final Sakuga Discussion"
                 className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white outline-none"
               />
             </div>
@@ -191,11 +198,11 @@ export const CommunityView: React.FC = () => {
               <select
                 value={newCategory}
                 onChange={e => setNewCategory(e.target.value as any)}
-                className="w-full bg-[#131520] border border-[#2A2F45] text-xs text-slate-200 rounded-xl p-2 outline-none"
+                className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white outline-none"
               >
                 <option value="General">General</option>
-                <option value="Theories">Theories</option>
                 <option value="Episode Reaction">Episode Reaction</option>
+                <option value="Theories">Theories</option>
                 <option value="Manga Discussion">Manga Discussion</option>
                 <option value="Recommendations">Recommendations</option>
               </select>
@@ -247,206 +254,127 @@ export const CommunityView: React.FC = () => {
 
           <button
             type="submit"
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-colors"
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-colors cursor-pointer"
           >
             Publish Topic
           </button>
         </form>
       )}
 
-      {/* Main 2-Column: Thread List + Thread Details & Comments */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Topics List */}
-        <div className="space-y-3">
-          {/* Category Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar p-1 bg-[#181A26] border border-[#2A2F45] rounded-xl">
-            {categories.map(cat => (
-              <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-all whitespace-nowrap shrink-0 ${
-                  activeCategory === cat
-                    ? 'bg-indigo-600 text-white font-semibold'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
+      {/* Community Section Switcher: Forums vs Live Activity Feed */}
+      <div className="flex items-center gap-2 border-b border-[#2A2F45] pb-3">
+        <button
+          type="button"
+          onClick={() => setCommunityTab('discussions')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+            communityTab === 'discussions'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/40'
+              : 'text-slate-400 hover:text-white hover:bg-[#181A26]'
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" />
+          <span>Discussions & Forums</span>
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/10 text-white font-mono">
+            {topics.length}
+          </span>
+        </button>
 
-          {/* List of Topics */}
-          <div className="space-y-2.5">
-            {filteredTopics.map(topic => {
-              const isSelected = selectedTopic?.id === topic.id;
+        <button
+          type="button"
+          onClick={() => setCommunityTab('activity')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+            communityTab === 'activity'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/40'
+              : 'text-slate-400 hover:text-white hover:bg-[#181A26]'
+          }`}
+        >
+          <Activity className="w-4 h-4" />
+          <span>Global Activity</span>
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/10 text-white font-mono">
+            {activities.length + reviews.length}
+          </span>
+        </button>
+      </div>
 
-              return (
-                <div
-                  key={topic.id}
-                  onClick={() => setSelectedTopic(topic)}
-                  className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-indigo-950/20 border-indigo-500 shadow-md ring-1 ring-indigo-500/50'
-                      : 'bg-[#181A26] border-[#2A2F45] hover:border-slate-500'
+      {communityTab === 'discussions' ? (
+        /* Main 2-Column: Thread List + Modular DiscussionThreadReader */
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column: Topics List */}
+          <div className="space-y-3">
+            {/* Category Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar p-1 bg-[#181A26] border border-[#2A2F45] rounded-xl">
+              {categories.map(cat => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setActiveCategory(cat)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                    activeCategory === cat
+                      ? 'bg-indigo-600 text-white font-semibold'
+                      : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  <div className="flex items-center justify-between text-[11px] mb-1">
-                    <span className="text-indigo-400 font-semibold">{topic.category}</span>
-                    <span className="text-slate-400">{topic.createdAt}</span>
-                  </div>
+                  {cat}
+                </button>
+              ))}
+            </div>
 
-                  <h3 className="text-xs font-bold text-white line-clamp-2 leading-snug">{topic.title}</h3>
+            {/* List of Topics */}
+            <div className="space-y-2.5">
+              {filteredTopics.map(topic => {
+                const isSelected = selectedTopic?.id === topic.id;
 
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2.5 pt-2 border-t border-[#2A2F45]/50">
-                    <span className="truncate max-w-[120px]">@{topic.username}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="flex items-center gap-1">
-                        <MessageSquare className="w-3 h-3 text-slate-500" />
-                        {topic.replies.length}
+                return (
+                  <div
+                    key={topic.id}
+                    onClick={() => setSelectedTopic(topic)}
+                    className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#1D2132] border-indigo-500/60 shadow-lg'
+                        : 'bg-[#181A26] border-[#2A2F45] hover:border-slate-500'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between text-[11px] mb-1">
+                      <span className="text-indigo-400 font-medium px-2 py-0.5 rounded bg-indigo-500/10">
+                        {topic.category}
                       </span>
+                      <span className="text-slate-400 font-mono">{topic.createdAt}</span>
+                    </div>
+
+                    <h4 className="text-xs font-semibold text-white line-clamp-1 mb-1">
+                      {topic.title}
+                    </h4>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span>@{topic.username}</span>
+                      <div className="flex items-center gap-1">
+                        <MessageSquare className="w-3 h-3" />
+                        <span>{topic.replies.length} replies</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right Column: Modular Thread Reader Component */}
+          <div className="lg:col-span-2">
+            <DiscussionThreadReader
+              selectedTopic={selectedTopic}
+              onVotePoll={votePoll}
+              onSendReply={(content, isSpoiler) => {
+                if (selectedTopic) {
+                  replyTopic(selectedTopic.id, content, isSpoiler);
+                }
+              }}
+            />
           </div>
         </div>
-
-        {/* Right 2 Columns: Selected Topic Thread Viewer */}
-        <div className="lg:col-span-2">
-          {selectedTopic ? (
-            <div className="bg-[#181A26] border border-[#2A2F45] rounded-2xl p-6 shadow-xl space-y-6">
-              {/* Header */}
-              <div>
-                <div className="flex items-center gap-2 text-xs text-indigo-400 font-semibold mb-1">
-                  <span>{selectedTopic.category}</span>
-                  {selectedTopic.isPinned && (
-                    <span className="flex items-center gap-1 text-amber-400 text-[10px] font-mono font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">
-                      <Pin className="w-3 h-3" /> PINNED
-                    </span>
-                  )}
-                </div>
-                <h2 className="text-lg font-bold text-white tracking-tight">{selectedTopic.title}</h2>
-                <div className="flex items-center gap-2 mt-2 text-xs text-slate-400">
-                  <img src={selectedTopic.avatar} alt="Author" className="w-5 h-5 rounded-full object-cover" />
-                  <span className="font-medium text-slate-200">{selectedTopic.displayName}</span>
-                  <span>·</span>
-                  <span>{selectedTopic.createdAt}</span>
-                </div>
-              </div>
-
-              {/* Topic Content Body */}
-              <p className="text-xs sm:text-sm text-slate-200 leading-relaxed whitespace-pre-line border-t border-b border-[#2A2F45]/60 py-4">
-                {selectedTopic.content}
-              </p>
-
-              {/* Community Poll (if attached) */}
-              {selectedTopic.poll && (
-                <div className="bg-[#131520] border border-indigo-500/30 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Vote className="w-4 h-4 text-indigo-400" />
-                    <h4 className="text-xs font-bold text-white">{selectedTopic.poll.question}</h4>
-                  </div>
-
-                  {/* Poll Options */}
-                  <div className="space-y-2">
-                    {selectedTopic.poll.options.map(option => {
-                      const totalVotes = selectedTopic.poll!.options.reduce((sum, o) => sum + o.votes, 0);
-                      const pct = totalVotes > 0 ? Math.round((option.votes / totalVotes) * 100) : 0;
-                      const hasVotedThis = selectedTopic.poll!.userVotedOptionId === option.id;
-
-                      return (
-                        <button
-                          key={option.id}
-                          onClick={() => votePoll(selectedTopic.id, option.id)}
-                          className={`w-full relative overflow-hidden p-3 rounded-lg border text-left text-xs transition-all ${
-                            hasVotedThis
-                              ? 'border-indigo-500 bg-indigo-950/30 font-semibold'
-                              : 'border-[#2A2F45] bg-[#181A26] hover:border-slate-500'
-                          }`}
-                        >
-                          {/* Progress fill */}
-                          <div
-                            className="absolute top-0 bottom-0 left-0 bg-indigo-600/20 transition-all duration-500"
-                            style={{ width: `${pct}%` }}
-                          />
-
-                          <div className="relative z-10 flex items-center justify-between">
-                            <span className="text-slate-200">{option.text}</span>
-                            <span className="font-mono text-indigo-300 tabular-nums">
-                              {pct}% ({option.votes})
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Replies Section */}
-              <div className="space-y-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Replies ({selectedTopic.replies.length})
-                </h3>
-
-                <div className="space-y-3">
-                  {selectedTopic.replies.map(reply => (
-                    <div key={reply.id} className="bg-[#131520] border border-[#2A2F45] rounded-xl p-3.5 space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <img src={reply.avatar} alt={reply.displayName} className="w-6 h-6 rounded-full object-cover" />
-                          <span className="font-semibold text-white">{reply.displayName}</span>
-                          <span className="text-[11px] text-slate-400">@{reply.username}</span>
-                        </div>
-                        <span className="text-[11px] text-slate-500 font-mono">{reply.createdAt}</span>
-                      </div>
-
-                      <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-line pl-8">
-                        {reply.content}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Reply Authoring Input */}
-                <form onSubmit={handleSendReply} className="pt-2 space-y-2">
-                  <textarea
-                    rows={2}
-                    value={replyText}
-                    onChange={e => setReplyText(e.target.value)}
-                    placeholder="Join the discussion..."
-                    className="w-full bg-[#131520] border border-[#2A2F45] focus:border-indigo-500 rounded-xl p-3 text-xs text-white outline-none resize-none placeholder:text-slate-500"
-                  />
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={replySpoiler}
-                        onChange={e => setReplySpoiler(e.target.checked)}
-                        className="w-3.5 h-3.5 accent-indigo-600 rounded"
-                      />
-                      <span>Mark spoiler</span>
-                    </label>
-
-                    <button
-                      type="submit"
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md shadow-indigo-600/25"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      Post Reply
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          ) : (
-            <div className="p-12 text-center text-xs text-slate-400 bg-[#181A26] rounded-2xl border border-[#2A2F45]">
-              Select a discussion topic to read replies or cast your vote.
-            </div>
-          )}
-        </div>
-      </div>
+      ) : (
+        /* Modular Global Activity Feed Component */
+        <GlobalActivity />
+      )}
     </div>
   );
 };

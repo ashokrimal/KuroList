@@ -7,7 +7,12 @@ import {
   signInWithPopup,
   signOut as firebaseSignOut,
   onAuthStateChanged,
-  User as FirebaseUser
+  User as FirebaseUser,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  updatePassword,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import {
   collection,
@@ -32,6 +37,81 @@ export async function signInWithGoogle(): Promise<FirebaseUser | null> {
   } catch (error: any) {
     console.error('Google Sign-In failed:', error);
     throw error;
+  }
+}
+
+/**
+ * Sign in with Email and Password
+ */
+export async function loginWithEmail(email: string, password: string): Promise<FirebaseUser> {
+  try {
+    const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+    return cred.user;
+  } catch (error: any) {
+    console.error('Email Sign-In failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Sign up with Email and Password
+ */
+export async function signUpWithEmail(email: string, password: string, displayName: string): Promise<FirebaseUser> {
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+    if (displayName && cred.user) {
+      await updateProfile(cred.user, { displayName });
+    }
+    return cred.user;
+  } catch (error: any) {
+    console.error('Email Sign-Up failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Reset password via Email
+ */
+export async function resetUserPassword(email: string): Promise<void> {
+  try {
+    await sendPasswordResetEmail(auth, email.trim());
+  } catch (error: any) {
+    console.error('Password reset failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update password for currently signed-in user
+ */
+export async function updateUserPassword(newPassword: string): Promise<void> {
+  if (!auth.currentUser) {
+    throw new Error('Please sign in with your email and password to change your password.');
+  }
+  try {
+    await updatePassword(auth.currentUser, newPassword);
+  } catch (error: any) {
+    console.error('Password update failed:', error);
+    if (error.code === 'auth/requires-recent-login') {
+      throw new Error('For security, this action requires a recent sign-in. Please log out and sign in again before changing password.');
+    }
+    throw error;
+  }
+}
+
+/**
+ * Update user display name and avatar in Firebase Auth
+ */
+export async function updateUserAuthProfile(displayName?: string, photoURL?: string): Promise<void> {
+  if (auth.currentUser) {
+    try {
+      await updateProfile(auth.currentUser, {
+        displayName: displayName ?? auth.currentUser.displayName,
+        photoURL: photoURL ?? auth.currentUser.photoURL
+      });
+    } catch (error) {
+      console.warn('Firebase updateProfile error:', error);
+    }
   }
 }
 
