@@ -8,6 +8,7 @@ import { Calendar, Clock, Bell, Bookmark, Play, Check } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { MediaItem } from '../types';
 import { SeasonalSkeleton } from '../components/SkeletonLoader';
+import { fetchWeeklyBroadcastSchedule } from '../services/animeCatalogService';
 
 export const SeasonalCalendarView: React.FC = () => {
   const {
@@ -21,11 +22,27 @@ export const SeasonalCalendarView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
   const [selectedDay, setSelectedDay] = useState<typeof daysOfWeek[number]>('Saturday');
-  const [activeSeason, setActiveSeason] = useState('Fall 2026 / Winter 2025');
+  const [activeSeason, setActiveSeason] = useState('Current Season Airing Schedule');
+  const [weeklySchedule, setWeeklySchedule] = useState<Record<string, MediaItem[]>>({});
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 200);
-    return () => clearTimeout(timer);
+    let isCancelled = false;
+    fetchWeeklyBroadcastSchedule()
+      .then(schedule => {
+        if (!isCancelled && schedule) {
+          setWeeklySchedule(schedule);
+        }
+      })
+      .catch(err => {
+        console.warn('Could not fetch live schedule:', err);
+      })
+      .finally(() => {
+        if (!isCancelled) setIsLoading(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   if (isLoading) {
@@ -34,7 +51,9 @@ export const SeasonalCalendarView: React.FC = () => {
 
   // Filter airing anime for selected day
   const airingAnime = mediaItems.filter(m => m.type === 'anime');
-  const dayAnime = airingAnime.filter(m => (m.airingDay || 'Saturday') === selectedDay);
+  const dayAnime = (weeklySchedule[selectedDay] && weeklySchedule[selectedDay].length > 0)
+    ? weeklySchedule[selectedDay]
+    : airingAnime.filter(m => (m.airingDay || 'Saturday') === selectedDay);
 
   const handleSetReminder = (anime: MediaItem) => {
     showToast(`Episode alert enabled for ${anime.title}!`);
@@ -63,7 +82,9 @@ export const SeasonalCalendarView: React.FC = () => {
       <div className="flex items-center gap-1.5 p-1.5 bg-[#181A26] border border-[#2A2F45] rounded-2xl overflow-x-auto no-scrollbar">
         {daysOfWeek.map(day => {
           const isSelected = selectedDay === day;
-          const count = airingAnime.filter(m => (m.airingDay || 'Saturday') === day).length;
+          const count = (weeklySchedule[day] && weeklySchedule[day].length > 0)
+            ? weeklySchedule[day].length
+            : airingAnime.filter(m => (m.airingDay || 'Saturday') === day).length;
 
           return (
             <button

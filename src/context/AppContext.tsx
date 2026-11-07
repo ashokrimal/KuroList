@@ -23,6 +23,12 @@ import { StreakState, getInitialStreakState, logStreakActivity } from '../utils/
 import { INITIAL_MEDIA_ITEMS } from '../data/animeData';
 import { CURRENT_USER, INITIAL_USER_LIBRARY, OTHER_USERS } from '../data/mockUsers';
 import {
+  fetchTrendingAnime,
+  fetchUpcomingAnime,
+  fetchTopManga,
+  searchGlobalCatalog
+} from '../services/animeCatalogService';
+import {
   INITIAL_ACTIVITIES,
   INITIAL_REVIEWS,
   INITIAL_COLLECTIONS,
@@ -180,13 +186,50 @@ interface AppContextType {
   showToast: (message: string, type?: 'success' | 'info' | 'error') => void;
 }
 
+const GUEST_USER: UserProfile = {
+  id: 'guest_user',
+  username: 'guest',
+  displayName: 'Anime Explorer',
+  email: '',
+  avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=guest',
+  banner: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=1600&auto=format&fit=crop&q=80',
+  bio: 'Sign in with Google or Email to track your personal anime & manga library, sync watchlists, and earn XP!',
+  country: 'Global',
+  joinDate: new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+  isOnline: true,
+  role: 'user',
+  level: 1,
+  xp: 0,
+  nextLevelXp: 100,
+  badges: [],
+  achievements: [],
+  followingCount: 0,
+  followersCount: 0,
+  personality: {
+    title: 'Anime Explorer',
+    tagline: 'Embarking on the anime discovery journey',
+    dominantGenre: 'Action',
+    watchingPace: 'Seasonal Follower',
+    vibeDescription: 'Starting fresh. Discover real titles and log episodes.',
+    compatibleArchetypes: ['Explorer']
+  },
+  favoriteMediaIds: [],
+  favoriteCharacterNames: [],
+  favoriteStudios: [],
+  privacy: {
+    publicLibrary: true,
+    publicFavorites: true,
+    publicActivity: true
+  }
+};
+
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // Current user state
+  // Current user state (defaults to real guest user, not hardcoded mock with fake 14 levels)
   const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
     const saved = localStorage.getItem('kuro_current_user');
-    return saved ? JSON.parse(saved) : CURRENT_USER;
+    return saved ? JSON.parse(saved) : GUEST_USER;
   });
 
   const [otherUsers] = useState<UserProfile[]>(OTHER_USERS);
@@ -194,7 +237,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const [following, setFollowing] = useState<string[]>(() => {
     const saved = localStorage.getItem('kuro_following');
-    return saved ? JSON.parse(saved) : ['user_kenji', 'user_sakura'];
+    return saved ? JSON.parse(saved) : [];
   });
 
   // Media catalog
@@ -203,10 +246,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return saved ? JSON.parse(saved) : INITIAL_MEDIA_ITEMS;
   });
 
-  // User library
+  // User library (defaults to empty array: zero fake placeholder titles)
   const [library, setLibrary] = useState<LibraryEntry[]>(() => {
     const saved = localStorage.getItem('kuro_library');
-    return saved ? JSON.parse(saved) : INITIAL_USER_LIBRARY;
+    return saved ? JSON.parse(saved) : [];
   });
 
   // Social feeds
@@ -408,16 +451,57 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         // Load personal library from Firestore
         try {
           const cloudLibrary = await fetchUserLibraryFromFirestore(fUser.uid);
-          if (cloudLibrary && cloudLibrary.length > 0) {
-            setLibrary(cloudLibrary as LibraryEntry[]);
-          }
+          setLibrary((cloudLibrary || []) as LibraryEntry[]);
         } catch (e) {
           console.warn('Could not load user library from Firestore:', e);
+        }
+      } else {
+        // User is not signed into Firebase: enforce clean guest state
+        const saved = localStorage.getItem('kuro_current_user');
+        if (!saved || JSON.parse(saved).id === 'guest_user') {
+          setCurrentUser(GUEST_USER);
+          setActiveProfileViewUser(GUEST_USER);
+          const savedLib = localStorage.getItem('kuro_library');
+          if (!savedLib) {
+            setLibrary([]);
+          }
         }
       }
     });
 
     return () => unsubscribe();
+  }, []);
+
+  // Hydrate live anime, upcoming announced releases, and manga from AniList daily engine
+  useEffect(() => {
+    let isCancelled = false;
+    const hydrateLiveCatalog = async () => {
+      try {
+        const [trending, upcoming, manga] = await Promise.all([
+          fetchTrendingAnime(1, 24),
+          fetchUpcomingAnime(1, 24),
+          fetchTopManga(1, 24)
+        ]);
+
+        if (isCancelled) return;
+
+        const combined = [...trending.items, ...upcoming.items, ...manga.items];
+        if (combined.length > 0) {
+          setMediaItems(prev => {
+            const map = new Map(prev.map(i => [i.id, i]));
+            combined.forEach(item => map.set(item.id, item));
+            return Array.from(map.values());
+          });
+        }
+      } catch (err) {
+        console.warn('Live AniList catalog hydration notice:', err);
+      }
+    };
+
+    hydrateLiveCatalog();
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   const signInWithGoogleAction = async () => {
@@ -504,9 +588,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       await signOutUser();
       setFirebaseUser(null);
-      setCurrentUser(CURRENT_USER);
-      setActiveProfileViewUser(CURRENT_USER);
-      showToast('Signed out. Restored demo profile.', 'info');
+      setCurrentUser(GUEST_USER);
+      setActiveProfileViewUser(GUEST_USER);
+      setLibrary([]);
+      localStorage.removeItem('kuro_library');
+      localStorage.removeItem('kuro_current_user');
+      showToast('Signed out successfully. Guest session active.', 'info');
     } catch (err: any) {
       console.error(err);
       showToast('Failed to sign out', 'error');
@@ -1187,49 +1274,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return localMatches;
     }
 
-    // 2. Fallback to Jikan API
+    // 2. Query live AniList global database of millions of titles
     try {
       setIsSearchingOnline(true);
-      const endpoint = type === 'manga' ? 'manga' : 'anime';
-      const res = await fetch(`https://api.jikan.moe/v4/${endpoint}?q=${encodeURIComponent(query)}&limit=6&sfw`);
-      if (!res.ok) throw new Error('Jikan error');
-      const data = await res.json();
+      const searchRes = await searchGlobalCatalog({
+        search: query,
+        type,
+        perPage: 24
+      });
 
-      if (data && Array.isArray(data.data)) {
-        const onlineItems: MediaItem[] = data.data.map((item: any) => ({
-          id: `mal_${item.mal_id}`,
-          malId: item.mal_id,
-          title: item.title || item.title_english || 'Untitled',
-          titleRomaji: item.title,
-          titleJapanese: item.title_japanese,
-          type: type === 'manga' ? 'manga' : 'anime',
-          format: item.type === 'TV' ? 'TV' : (item.type || 'TV'),
-          status: item.airing ? 'airing' : (item.status === 'Finished Airing' ? 'finished' : 'upcoming'),
-          episodes: item.episodes || 12,
-          chapters: item.chapters,
-          duration: item.duration,
-          season: item.season ? item.season.charAt(0).toUpperCase() + item.season.slice(1) : undefined,
-          year: item.year || (item.aired?.prop?.from?.year),
-          score: item.score || 7.5,
-          rank: item.rank || 500,
-          popularity: item.popularity || 200,
-          members: item.members || 50000,
-          synopsis: item.synopsis || 'No synopsis provided.',
-          genres: item.genres?.map((g: any) => g.name) || ['Action'],
-          studios: item.studios?.map((s: any) => s.name) || ['Animation Studio'],
-          coverImage: item.images?.webp?.large_image_url || item.images?.jpg?.large_image_url || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&auto=format&fit=crop&q=80',
-          bannerImage: '/src/assets/images/hero_cinematic_anime_1793517807898.jpg',
-          trailerUrl: item.trailer?.url
-        }));
-
+      if (searchRes.items && searchRes.items.length > 0) {
         // Merge into global media catalog avoiding duplicates
         setMediaItems(prev => {
           const newMap = new Map(prev.map(i => [i.id, i]));
-          onlineItems.forEach(item => newMap.set(item.id, item));
+          searchRes.items.forEach(item => newMap.set(item.id, item));
           return Array.from(newMap.values());
         });
 
-        return onlineItems;
+        return searchRes.items;
       }
     } catch {
       // Graceful fallback to local matches

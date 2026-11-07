@@ -24,8 +24,7 @@ export const HomeView: React.FC = () => {
     setSelectedMedia,
     openAddToListModal,
     incrementProgress,
-    setActiveView,
-    setIsIdentityCardOpen
+    setActiveView
   } = useApp();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -69,7 +68,6 @@ export const HomeView: React.FC = () => {
         media={heroAnime}
         onOpenDetails={setSelectedMedia}
         onTrackProgress={openAddToListModal}
-        onOpenPassport={() => setIsIdentityCardOpen(true)}
       />
 
       {/* 2. Continue Tracking Shelf Component */}

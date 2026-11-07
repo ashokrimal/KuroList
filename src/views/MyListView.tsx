@@ -7,7 +7,7 @@
  * - Quick search and sorting
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Bookmark,
   LayoutGrid,
@@ -30,7 +30,8 @@ import {
   Square,
   Check,
   X,
-  AlertTriangle
+  AlertTriangle,
+  Loader2
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { AnimeCard } from '../components/AnimeCard';
@@ -38,6 +39,7 @@ import { MyListSkeleton } from '../components/SkeletonLoader';
 import { ImportExportModal } from '../components/ImportExportModal';
 import { MediaType, LibraryStatus } from '../types';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
 import { triggerHaptic } from '../utils/haptics';
 
 export const MyListView: React.FC = () => {
@@ -69,10 +71,20 @@ export const MyListView: React.FC = () => {
   const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState<boolean>(false);
 
+  // Virtualized DOM slicing states for infinite scrolling
+  const INITIAL_BATCH_SIZE = 25;
+  const [visibleCount, setVisibleCount] = useState(INITIAL_BATCH_SIZE);
+  const [isLoadingNextBatch, setIsLoadingNextBatch] = useState(false);
+
   React.useEffect(() => {
     const timer = setTimeout(() => setIsLoading(false), 200);
     return () => clearTimeout(timer);
   }, []);
+
+  // Reset windowing whenever active filters or media type change
+  useEffect(() => {
+    setVisibleCount(INITIAL_BATCH_SIZE);
+  }, [mediaType, selectedStatus, searchFilter, sortBy]);
 
   // Filter entries for current user and media type
   const userEntries = useMemo(() => {
@@ -121,6 +133,29 @@ export const MyListView: React.FC = () => {
       });
   }, [userEntries, selectedStatus, searchFilter, sortBy, mediaItems]);
 
+  // Sliced entries rendered in DOM to eliminate DOM bloat on large libraries
+  const visibleEntries = useMemo(() => {
+    return displayedEntries.slice(0, visibleCount);
+  }, [displayedEntries, visibleCount]);
+
+  const hasMoreEntries = visibleCount < displayedEntries.length;
+
+  const handleLoadMoreEntries = useCallback(() => {
+    if (isLoadingNextBatch || !hasMoreEntries) return;
+    setIsLoadingNextBatch(true);
+    setTimeout(() => {
+      setVisibleCount(prev => Math.min(displayedEntries.length, prev + 25));
+      setIsLoadingNextBatch(false);
+    }, 60);
+  }, [isLoadingNextBatch, hasMoreEntries, displayedEntries.length]);
+
+  const { sentinelRef: myListSentinelRef } = useInfiniteScroll({
+    hasMore: hasMoreEntries,
+    isLoading: isLoadingNextBatch,
+    onLoadMore: handleLoadMoreEntries,
+    rootMargin: '350px'
+  });
+
   // Handle toggling single item selection
   const handleToggleSelect = (mediaId: string) => {
     triggerHaptic('selection');
@@ -135,16 +170,16 @@ export const MyListView: React.FC = () => {
 
   // Check if all visible entries are selected
   const allVisibleSelected =
-    displayedEntries.length > 0 && displayedEntries.every(e => selectedMediaIds.includes(e.mediaId));
+    visibleEntries.length > 0 && visibleEntries.every(e => selectedMediaIds.includes(e.mediaId));
 
   // Toggle select all visible items
   const handleToggleSelectAll = () => {
     triggerHaptic('medium');
     if (allVisibleSelected) {
-      const visibleIds = new Set(displayedEntries.map(e => e.mediaId));
+      const visibleIds = new Set(visibleEntries.map(e => e.mediaId));
       setSelectedMediaIds(prev => prev.filter(id => !visibleIds.has(id)));
     } else {
-      const visibleIds = displayedEntries.map(e => e.mediaId);
+      const visibleIds = visibleEntries.map(e => e.mediaId);
       setSelectedMediaIds(prev => Array.from(new Set([...prev, ...visibleIds])));
       setIsSelectionMode(true);
     }
@@ -444,7 +479,7 @@ export const MyListView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#25283C]/60">
-                {displayedEntries.map(entry => {
+                {visibleEntries.map(entry => {
                   const media = mediaItems.find(m => m.id === entry.mediaId);
                   if (!media) return null;
                   const isCompleted = entry.status === 'completed';
@@ -606,7 +641,7 @@ export const MyListView: React.FC = () => {
       ) : (
         /* Poster Grid View */
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {displayedEntries.map(entry => {
+          {visibleEntries.map(entry => {
             const media = mediaItems.find(m => m.id === entry.mediaId);
             if (!media) return null;
             const isSelected = selectedMediaIds.includes(media.id);
@@ -645,6 +680,27 @@ export const MyListView: React.FC = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Infinite Scroll Sentinel and Batch Status Indicator */}
+      {displayedEntries.length > 0 && (
+        <div className="py-4 text-center">
+          {hasMoreEntries ? (
+            <div
+              ref={myListSentinelRef}
+              className="py-4 flex flex-col sm:flex-row items-center justify-center gap-2 text-xs text-slate-400 bg-[#161824]/40 border border-[#25283C]/60 rounded-xl max-w-md mx-auto"
+            >
+              <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+              <span>
+                Loading more titles ({visibleEntries.length} of {displayedEntries.length} shown)...
+              </span>
+            </div>
+          ) : displayedEntries.length > INITIAL_BATCH_SIZE ? (
+            <div className="text-xs text-slate-500 font-mono py-2">
+              Showing all {displayedEntries.length} titles · End of your {mediaType} library
+            </div>
+          ) : null}
         </div>
       )}
 

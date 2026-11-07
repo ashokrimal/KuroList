@@ -44,7 +44,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSyncModal }) => {
     searchMedia,
     openAddToListModal,
     gamification,
-    setIsCommandPaletteOpen
+    setIsCommandPaletteOpen,
+    firebaseUser,
+    signOutAction
   } = useApp();
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -262,49 +264,31 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSyncModal }) => {
                     Curated Collections
                   </button>
 
-                  {/* Switch to other demo users */}
-                  <div className="pt-2 pb-1 px-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                    Switch Active Account
-                  </div>
-                  {otherUsers.map(user => (
-                    <button
-                      key={user.id}
-                      onClick={() => {
-                        switchUser(user);
-                        setIsUserMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:bg-[#1F2335] rounded-lg transition-colors text-left"
-                    >
-                      <img src={user.avatar} alt={user.displayName} className="w-5 h-5 rounded-full object-cover" />
-                      <span className="truncate">@{user.username}</span>
-                    </button>
-                  ))}
-
-                  {/* Admin dashboard if user is admin */}
-                  {currentUser.role === 'admin' && (
-                    <button
-                      onClick={() => {
-                        setIsAdminModalOpen(true);
-                        setIsUserMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors text-left mt-1"
-                    >
-                      <Shield className="w-4 h-4" />
-                      Admin & Moderation Panel
-                    </button>
-                  )}
-
+                  {/* Real Firebase Authentication Controls */}
                   <div className="border-t border-[#2A2F45]/60 my-1 pt-1">
-                    <button
-                      onClick={() => {
-                        setIsAuthModalOpen(true);
-                        setIsUserMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors text-left"
-                    >
-                      <LogOut className="w-4 h-4" />
-                      Switch Account / Sign In
-                    </button>
+                    {firebaseUser ? (
+                      <button
+                        onClick={() => {
+                          signOutAction();
+                          setIsUserMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors text-left"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        Sign Out ({firebaseUser.email || firebaseUser.displayName})
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setIsAuthModalOpen(true);
+                          setIsUserMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors text-left shadow-sm"
+                      >
+                        <UserCheck className="w-4 h-4" />
+                        Sign In / Create Account
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

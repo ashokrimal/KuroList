@@ -1,19 +1,17 @@
 import React from 'react';
-import { Play, Bookmark, Sparkles, Flame } from 'lucide-react';
+import { Play, Bookmark, Flame } from 'lucide-react';
 import { MediaItem } from '../types';
 
 interface HeroFeaturedAnimeProps {
   media: MediaItem;
   onOpenDetails: (media: MediaItem) => void;
   onTrackProgress: (media: MediaItem) => void;
-  onOpenPassport: () => void;
 }
 
 export const HeroFeaturedAnime: React.FC<HeroFeaturedAnimeProps> = ({
   media,
   onOpenDetails,
-  onTrackProgress,
-  onOpenPassport
+  onTrackProgress
 }) => {
   return (
     <section aria-label="Featured Anime Spotlight" className="relative -mx-4 sm:-mx-6 lg:-mx-8 -mt-6">
@@ -67,15 +65,6 @@ export const HeroFeaturedAnime: React.FC<HeroFeaturedAnimeProps> = ({
             >
               <Bookmark className="w-4 h-4 text-indigo-400" />
               Track Progress
-            </button>
-
-            <button
-              type="button"
-              onClick={onOpenPassport}
-              className="px-4 py-2.5 bg-gradient-to-r from-violet-600/20 to-indigo-600/20 hover:from-violet-600/30 hover:to-indigo-600/30 border border-indigo-500/30 text-indigo-300 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              My Anime Passport
             </button>
           </div>
         </div>

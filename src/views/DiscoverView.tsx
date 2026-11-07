@@ -6,7 +6,7 @@
  * - Clean responsive grid with touch ergonomics
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Search,
   Filter,
@@ -19,19 +19,27 @@ import {
   X,
   Flame,
   Tv,
-  BookOpen
+  BookOpen,
+  Calendar,
+  Loader2
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { AnimeCard } from '../components/AnimeCard';
 import { SearchHistoryDropdown } from '../components/SearchHistoryDropdown';
 import { SearchHistory } from '../components/SearchHistory';
 import { DiscoverSkeleton, AnimeCardSkeleton } from '../components/SkeletonLoader';
-import { MediaType, MediaStatus } from '../types';
+import { MediaItem, MediaType, MediaStatus } from '../types';
 import { GENRE_LIST } from '../data/animeData';
 import { useSearchHistory } from '../hooks/useSearchHistory';
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
+import {
+  fetchTrendingAnime,
+  fetchUpcomingAnime,
+  fetchTopManga
+} from '../services/animeCatalogService';
 
 export const DiscoverView: React.FC = () => {
-  const { mediaItems, searchMedia, isSearchingOnline, setSelectedMedia } = useApp();
+  const { mediaItems, searchMedia, isSearchingOnline, setSelectedMedia, setMediaItems } = useApp() as any;
   const { recentSearches, addSearch, removeSearch, clearAllSearches } = useSearchHistory();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -42,15 +50,29 @@ export const DiscoverView: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState<MediaStatus | 'all'>('all');
   const [sortBy, setSortBy] = useState<'popularity' | 'score' | 'rank' | 'title'>('score');
   const [minScore, setMinScore] = useState<number>(0);
-  const [quickFilter, setQuickFilter] = useState<'all' | 'airing' | 'top_rated' | 'popular' | 'manga'>('all');
+  const [quickFilter, setQuickFilter] = useState<'all' | 'airing' | 'upcoming' | 'top_rated' | 'popular' | 'manga'>('all');
+
+  // Virtualized rendering window: renders in batches of 24 to keep the DOM light
+  const DISCOVER_BATCH_SIZE = 24;
+  const [visibleDiscoverCount, setVisibleDiscoverCount] = useState(DISCOVER_BATCH_SIZE);
+
+  // Infinite Pagination from Live Catalog
+  const [catalogPage, setCatalogPage] = useState(2);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
   React.useEffect(() => {
     const timer = setTimeout(() => setIsLoading(false), 200);
     return () => clearTimeout(timer);
   }, []);
 
+  // Reset visible display count when filters change
+  useEffect(() => {
+    setVisibleDiscoverCount(DISCOVER_BATCH_SIZE);
+  }, [searchQuery, selectedType, selectedGenre, selectedStatus, sortBy, minScore, quickFilter]);
+
   // Quick filter presets
-  const handleQuickFilter = (preset: 'all' | 'airing' | 'top_rated' | 'popular' | 'manga') => {
+  const handleQuickFilter = (preset: 'all' | 'airing' | 'upcoming' | 'top_rated' | 'popular' | 'manga') => {
     setQuickFilter(preset);
     if (preset === 'all') {
       setSelectedStatus('all');
@@ -58,6 +80,10 @@ export const DiscoverView: React.FC = () => {
       setSortBy('score');
     } else if (preset === 'airing') {
       setSelectedStatus('airing');
+      setSelectedType('anime');
+      setSortBy('popularity');
+    } else if (preset === 'upcoming') {
+      setSelectedStatus('upcoming');
       setSelectedType('anime');
       setSortBy('popularity');
     } else if (preset === 'top_rated') {
@@ -73,9 +99,42 @@ export const DiscoverView: React.FC = () => {
     }
   };
 
+  const handleLoadMore = useCallback(async () => {
+    if (isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      let res;
+      if (quickFilter === 'upcoming') {
+        res = await fetchUpcomingAnime(catalogPage, 24);
+      } else if (quickFilter === 'manga' || selectedType === 'manga') {
+        res = await fetchTopManga(catalogPage, 24);
+      } else {
+        res = await fetchTrendingAnime(catalogPage, 24);
+      }
+
+      if (res.items && res.items.length > 0) {
+        if (setMediaItems) {
+          setMediaItems((prev: any[]) => {
+            const map = new Map(prev.map(i => [i.id, i]));
+            res.items.forEach(item => map.set(item.id, item));
+            return Array.from(map.values());
+          });
+        }
+        setCatalogPage(prev => prev + 1);
+        setHasMore(res.hasNextPage);
+      } else {
+        setHasMore(false);
+      }
+    } catch (e) {
+      console.warn('Load more failed:', e);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [isLoadingMore, quickFilter, catalogPage, selectedType, setMediaItems]);
+
   // Perform multi-dimensional filtering
   const filteredItems = useMemo(() => {
-    return mediaItems.filter(item => {
+    return (mediaItems as MediaItem[]).filter((item: MediaItem) => {
       // 1. Query match
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -83,8 +142,8 @@ export const DiscoverView: React.FC = () => {
           item.title.toLowerCase().includes(q) ||
           (item.titleRomaji && item.titleRomaji.toLowerCase().includes(q)) ||
           (item.titleJapanese && item.titleJapanese.includes(q)) ||
-          item.studios?.some(s => s.toLowerCase().includes(q)) ||
-          item.authors?.some(a => a.toLowerCase().includes(q));
+          item.studios?.some((s: string) => s.toLowerCase().includes(q)) ||
+          item.authors?.some((a: string) => a.toLowerCase().includes(q));
         if (!matchesTitle) return false;
       }
 
@@ -109,13 +168,43 @@ export const DiscoverView: React.FC = () => {
       }
 
       return true;
-    }).sort((a, b) => {
+    }).sort((a: MediaItem, b: MediaItem) => {
       if (sortBy === 'score') return b.score - a.score;
       if (sortBy === 'popularity') return a.popularity - b.popularity;
       if (sortBy === 'rank') return a.rank - b.rank;
       return a.title.localeCompare(b.title);
     });
   }, [mediaItems, searchQuery, selectedType, selectedGenre, selectedStatus, sortBy, minScore]);
+
+  // Windowed items rendered in DOM to eliminate DOM thrashing
+  const renderedItems = useMemo(() => {
+    return filteredItems.slice(0, visibleDiscoverCount);
+  }, [filteredItems, visibleDiscoverCount]);
+
+  const hasMoreLocalItems = visibleDiscoverCount < filteredItems.length;
+
+  const handleInfiniteTrigger = useCallback(async () => {
+    if (isLoadingMore) return;
+
+    // If there are more filtered items already in memory, expand DOM slice
+    if (visibleDiscoverCount < filteredItems.length) {
+      setVisibleDiscoverCount(prev => Math.min(filteredItems.length, prev + DISCOVER_BATCH_SIZE));
+      return;
+    }
+
+    // Otherwise, if we reached the end of in-memory items and not searching with a text query, fetch next page from AniList
+    if (hasMore && !searchQuery.trim()) {
+      await handleLoadMore();
+      setVisibleDiscoverCount(prev => prev + DISCOVER_BATCH_SIZE);
+    }
+  }, [isLoadingMore, visibleDiscoverCount, filteredItems.length, hasMore, searchQuery, handleLoadMore]);
+
+  const { sentinelRef: discoverSentinelRef } = useInfiniteScroll({
+    hasMore: hasMoreLocalItems || (hasMore && !searchQuery.trim()),
+    isLoading: isLoadingMore,
+    onLoadMore: handleInfiniteTrigger,
+    rootMargin: '450px'
+  });
 
   if (isLoading) {
     return <DiscoverSkeleton />;
@@ -175,6 +264,7 @@ export const DiscoverView: React.FC = () => {
         {[
           { id: 'all', label: 'All', icon: Sparkles },
           { id: 'airing', label: 'Airing Now', icon: Tv },
+          { id: 'upcoming', label: 'Announced & Upcoming', icon: Calendar },
           { id: 'top_rated', label: 'Top Rated', icon: Star },
           { id: 'popular', label: 'Most Popular', icon: Flame },
           { id: 'manga', label: 'Manga & Manhwa', icon: BookOpen }
@@ -367,8 +457,8 @@ export const DiscoverView: React.FC = () => {
           [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
             <AnimeCardSkeleton key={i} />
           ))
-        ) : filteredItems.length > 0 ? (
-          filteredItems.map(media => (
+        ) : renderedItems.length > 0 ? (
+          renderedItems.map((media: MediaItem) => (
             <AnimeCard key={media.id} media={media} />
           ))
         ) : (
@@ -387,6 +477,29 @@ export const DiscoverView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Infinite Scroll Sentinel & Automated Fetch Indicator */}
+      {(hasMoreLocalItems || (hasMore && !searchQuery.trim())) && (
+        <div ref={discoverSentinelRef} className="pt-6 pb-2 text-center">
+          {isLoadingMore ? (
+            <div className="flex flex-col items-center justify-center gap-2">
+              <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
+              <span className="text-xs text-slate-400 font-medium">Fetching next batch from AniList catalog...</span>
+            </div>
+          ) : (
+            <div className="h-6 flex items-center justify-center text-xs text-slate-500 font-mono">
+              Loading more titles ({renderedItems.length} of {filteredItems.length})...
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* End of results indicator */}
+      {!hasMoreLocalItems && !hasMore && filteredItems.length > 0 && !searchQuery.trim() && (
+        <div className="pt-8 text-center text-xs text-slate-500 font-mono">
+          All available titles loaded · End of catalog
+        </div>
+      )}
     </div>
   );
 };
